@@ -1,0 +1,88 @@
+[package]
+name = "dataset-viewer-backend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Web 框架
+axum = { version = "0.7", features = ["headers", "ws", "multipart"] }
+tokio = { version = "1.0", features = ["full"] }
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.5", features = ["fs", "cors", "trace", "limit"] }
+hyper = { version = "1.0", features = ["full"] }
+
+# 序列化和反序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# HTTP 客户端
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+
+# 异步
+async-trait = "0.1"
+futures = "0.3"
+
+# 错误处理
+thiserror = "1.0"
+anyhow = "1.0"
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# 配置
+config = "0.14"
+clap = { version = "4.0", features = ["derive"] }
+
+# UUID
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# 时间处理
+chrono = { version = "0.4", features = ["serde"] }
+
+# 压缩包处理
+zip = "2.1"
+tar = "0.4"
+flate2 = "1.0"
+sevenz-rust = "0.6"
+unrar = { version = "0.5", optional = true }
+
+# 加密和编码
+base64 = "0.22"
+url = "2.2"
+urlencoding = "2.1"
+hmac = "0.12"
+sha2 = "0.10"
+md5 = "0.7"
+
+# SSH 客户端
+russh = "0.45"
+russh-keys = "0.45"
+
+# WebDAV 客户端 (基于 reqwest)
+# 将直接使用 reqwest 实现
+
+# SMB 客户端
+pavao = "0.3"
+
+# 文件系统操作
+tempfile = "3.8"
+walkdir = "2"
+
+# 数据库 (用于会话存储)
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite"] }
+
+# WebSocket
+axum-tungstenite = "0.2"
+
+[features]
+default = []
+rar-support = ["unrar"]
+
+[lib]
+name = "dataset_viewer_backend"
+path = "src/lib.rs"
+
+[[bin]]
+name = "server"
+path = "src/main.rs"

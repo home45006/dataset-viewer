@@ -1,0 +1,54 @@
+{
+  "common": {
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "close": "Close",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "view": "View",
+    "download": "Download",
+    "upload": "Upload",
+    "search": "Search",
+    "filter": "Filter",
+    "sort": "Sort",
+    "refresh": "Refresh",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "submit": "Submit"
+  },
+  "nav": {
+    "home": "Home",
+    "browse": "Browse",
+    "settings": "Settings",
+    "about": "About"
+  },
+  "connection": {
+    "title": "Connect Storage",
+    "type": "Storage Type",
+    "local": "Local Files",
+    "oss": "Object Storage",
+    "webdav": "WebDAV",
+    "ssh": "SSH/SFTP",
+    "smb": "SMB/CIFS",
+    "huggingface": "HuggingFace Hub",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "connected": "Connected",
+    "connecting": "Connecting..."
+  },
+  "file": {
+    "name": "Name",
+    "size": "Size",
+    "modified": "Modified",
+    "type": "Type",
+    "folder": "Folder",
+    "file": "File",
+    "empty": "Empty folder",
+    "loading": "Loading files..."
+  }
+}
