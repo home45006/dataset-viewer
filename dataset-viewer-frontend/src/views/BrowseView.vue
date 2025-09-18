@@ -73,21 +73,52 @@
               </div>
 
               <!-- OSS 配置 -->
-              <div v-if="selectedStorageType === 'oss'" class="space-y-3">
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    端点地址
-                  </label>
-                  <input
-                    v-model="connectionConfig.endpoint"
-                    type="text"
-                    class="input"
-                    placeholder="https://oss-cn-hangzhou.aliyuncs.com"
-                  />
+              <div v-if="selectedStorageType === 'oss'" class="space-y-4">
+                <!-- 云服务商和地域选择 -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      云服务商
+                    </label>
+                    <select v-model="ossConfig.platform" @change="handlePlatformChange" class="input">
+                      <option value="aliyun">阿里云 OSS</option>
+                      <option value="tencent">腾讯云 COS</option>
+                      <option value="aws">AWS S3</option>
+                      <option value="huawei">华为云 OBS</option>
+                      <option value="minio">MinIO</option>
+                      <option value="custom">自定义</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      {{ ossConfig.platform === 'custom' ? '自定义端点' : '地域' }}
+                    </label>
+                    <select
+                      v-if="ossConfig.platform !== 'custom'"
+                      v-model="ossConfig.region"
+                      @change="handleRegionChange"
+                      class="input"
+                    >
+                      <option v-for="region in getCurrentRegions()" :key="region.id" :value="region.id">
+                        {{ region.name }}
+                      </option>
+                    </select>
+                    <input
+                      v-else
+                      v-model="ossConfig.customEndpoint"
+                      @input="handleCustomEndpointChange"
+                      type="url"
+                      class="input"
+                      placeholder="https://your-s3-compatible-endpoint.com"
+                    />
+                  </div>
                 </div>
+
+                <!-- 存储桶 -->
                 <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    存储桶
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    存储桶/Bucket
                   </label>
                   <input
                     v-model="connectionConfig.bucket"
@@ -96,29 +127,41 @@
                     placeholder="my-bucket"
                   />
                 </div>
-                <div class="grid grid-cols-2 gap-2">
+
+                <!-- 访问密钥 -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Access Key
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      访问密钥 (Access Key)
                     </label>
                     <input
                       v-model="connectionConfig.access_key"
                       type="text"
                       class="input"
-                      placeholder="LTAI..."
+                      placeholder="AccessKey ID"
                     />
                   </div>
                   <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Secret Key
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      私有密钥 (Secret Key)
                     </label>
                     <input
                       v-model="connectionConfig.secret_key"
                       type="password"
                       class="input"
-                      placeholder="密钥"
+                      placeholder="Secret Access Key"
                     />
                   </div>
+                </div>
+
+                <!-- 显示当前端点 -->
+                <div class="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    当前端点地址
+                  </label>
+                  <code class="text-xs text-gray-600 dark:text-gray-400">
+                    {{ getCurrentEndpoint() }}
+                  </code>
                 </div>
               </div>
 
@@ -159,6 +202,88 @@
                 </div>
               </div>
 
+              <!-- 缓存信息 -->
+              <div v-if="hasAnyCache" class="relative mb-4">
+                <!-- 头部 -->
+                <div class="flex items-center justify-between mb-3">
+                  <div class="flex items-center space-x-2">
+                    <div class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                    <span class="text-sm font-medium text-emerald-700 dark:text-emerald-300">已保存的配置</span>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">({{ allCacheInfo.length }})</span>
+                  </div>
+                  <button
+                    @click="clearCache"
+                    class="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all duration-200 group"
+                    title="清除所有缓存"
+                  >
+                    <svg class="w-4 h-4 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                    </svg>
+                  </button>
+                </div>
+
+                <!-- 缓存卡片列表 -->
+                <div class="space-y-3">
+                  <div v-for="cache in allCacheInfo" :key="cache.storageType" class="relative group">
+                    <!-- 背景装饰 -->
+                    <div class="absolute inset-0 bg-gradient-to-r from-emerald-50 to-blue-50 dark:from-emerald-900/10 dark:to-blue-900/10 rounded-xl"></div>
+                    <div class="absolute inset-0 bg-white/50 dark:bg-gray-800/50 backdrop-blur-sm rounded-xl border border-emerald-200/50 dark:border-emerald-700/30 group-hover:border-emerald-300 dark:group-hover:border-emerald-600 transition-all duration-200"></div>
+
+                    <!-- 删除按钮 -->
+                    <button
+                      @click="clearSpecificCache(cache.storageType)"
+                      class="absolute top-2 right-2 z-10 p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all duration-200 opacity-0 group-hover:opacity-100"
+                      :title="`清除${ConnectionCacheService.getStorageTypeName(cache.storageType)}缓存`"
+                    >
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                      </svg>
+                    </button>
+
+                    <!-- 缓存卡片内容 -->
+                    <button
+                      @click="loadSpecificCacheConfig(cache.storageType)"
+                      class="w-full relative"
+                    >
+                      <!-- 左侧装饰条 -->
+                      <div class="absolute left-0 top-2 bottom-2 w-1 bg-gradient-to-b from-emerald-400 to-blue-500 rounded-r-full group-hover:w-1.5 transition-all duration-200"></div>
+
+                      <!-- 内容 -->
+                      <div class="relative flex items-center space-x-4 p-3 pl-5">
+                        <!-- 图标 -->
+                        <div class="flex-shrink-0 w-9 h-9 bg-gradient-to-br from-emerald-100 to-blue-100 dark:from-emerald-900/30 dark:to-blue-900/30 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform duration-200">
+                          <svg class="w-4 h-4 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                          </svg>
+                        </div>
+
+                        <!-- 文本信息 -->
+                        <div class="flex-1 text-left">
+                          <div class="flex items-center space-x-2 mb-1">
+                            <h4 class="text-sm font-semibold text-gray-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+                              {{ ConnectionCacheService.getStorageTypeName(cache.storageType) }}
+                            </h4>
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+                              快速连接
+                            </span>
+                          </div>
+                          <p class="text-xs text-gray-500 dark:text-gray-400">
+                            上次使用：{{ cache.lastUsed }}
+                          </p>
+                        </div>
+
+                        <!-- 右侧箭头 -->
+                        <div class="flex-shrink-0">
+                          <svg class="w-4 h-4 text-gray-400 group-hover:text-emerald-500 group-hover:translate-x-1 transition-all duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+                          </svg>
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <!-- 连接按钮 -->
               <button
                 @click="connect"
@@ -193,13 +318,39 @@
             <div class="card-header flex items-center justify-between">
               <div class="flex items-center space-x-4">
                 <h3 class="text-lg font-medium text-gray-900 dark:text-white">文件浏览</h3>
-                <nav class="text-sm text-gray-500">
-                  <span>/</span>
-                  <span v-for="(segment, index) in pathSegments" :key="index">
-                    <span class="mx-1">/</span>
-                    <span>{{ segment }}</span>
-                  </span>
+                <nav class="flex items-center text-sm text-gray-500 dark:text-gray-400">
+                  <!-- 根目录 -->
+                  <button
+                    @click="navigateToPath('')"
+                    class="hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
+                    title="返回根目录"
+                  >
+                    根目录
+                  </button>
+                  <!-- 路径段 -->
+                  <template v-for="(segment, index) in pathSegments" :key="index">
+                    <span class="mx-1 text-gray-300 dark:text-gray-600">/</span>
+                    <button
+                      @click="navigateToPath(pathSegments.slice(0, index + 1).join('/'))"
+                      class="hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
+                      :title="`进入 ${segment} 目录`"
+                    >
+                      {{ segment }}
+                    </button>
+                  </template>
                 </nav>
+                <!-- 返回上级目录按钮 -->
+                <button
+                  v-if="currentPath"
+                  @click="navigateToParent"
+                  class="flex items-center space-x-1 text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 px-2 py-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                  title="返回上级目录"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+                  </svg>
+                  <span>上级目录</span>
+                </button>
               </div>
               
               <button
@@ -236,6 +387,25 @@
                     </tr>
                   </thead>
                   <tbody>
+                    <!-- 返回上级目录选项 -->
+                    <tr
+                      v-if="currentPath"
+                      @click="navigateToParent"
+                      class="cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20 border-b border-blue-200 dark:border-blue-800"
+                    >
+                      <td>
+                        <div class="flex items-center justify-center">
+                          <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+                          </svg>
+                        </div>
+                      </td>
+                      <td class="font-medium text-blue-600 dark:text-blue-400">.. (返回上级目录)</td>
+                      <td class="text-sm text-gray-500">-</td>
+                      <td class="text-sm text-gray-500">-</td>
+                      <td></td>
+                    </tr>
+                    <!-- 文件和目录列表 -->
                     <tr
                       v-for="file in files"
                       :key="file.filename"
@@ -286,12 +456,241 @@
         </div>
       </div>
     </div>
+
+    <!-- ZIP文件浏览对话框 -->
+    <div
+      v-if="isArchiveBrowseOpen"
+      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+      @click="closeArchiveBrowse"
+    >
+      <div
+        class="bg-white dark:bg-gray-800 rounded-lg max-w-6xl w-full max-h-[85vh] flex flex-col"
+        @click.stop
+      >
+        <!-- ZIP浏览头部 -->
+        <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+          <div class="flex items-center space-x-4">
+            <div>
+              <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
+                📦 {{ archiveFile?.basename }}
+              </h3>
+              <p class="text-sm text-gray-500 dark:text-gray-400">
+                压缩包内容浏览
+              </p>
+            </div>
+            <!-- 路径导航 -->
+            <div v-if="archiveCurrentPath" class="flex items-center text-sm text-gray-600 dark:text-gray-300">
+              <button
+                @click="archiveCurrentPath = ''"
+                class="hover:text-blue-600 dark:hover:text-blue-400"
+              >
+                根目录
+              </button>
+              <template v-for="(segment, index) in archiveCurrentPath.split('/').filter(Boolean)" :key="index">
+                <span class="mx-1">/</span>
+                <button
+                  @click="archiveCurrentPath = archiveCurrentPath.split('/').slice(0, index + 1).join('/')"
+                  class="hover:text-blue-600 dark:hover:text-blue-400"
+                >
+                  {{ segment }}
+                </button>
+              </template>
+            </div>
+          </div>
+          <button
+            @click="closeArchiveBrowse"
+            class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+          >
+            <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- ZIP浏览内容 -->
+        <div class="flex-1 overflow-auto p-4">
+          <div v-if="isLoadingArchive" class="flex items-center justify-center h-64">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          </div>
+
+          <div v-else-if="archiveInfo && archiveInfo.entries" class="space-y-2">
+            <!-- 返回上级按钮 -->
+            <div v-if="archiveCurrentPath" class="border-b pb-2 mb-4">
+              <button
+                @click="navigateToArchiveParent"
+                class="flex items-center space-x-2 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+                </svg>
+                <span>返回上级目录</span>
+              </button>
+            </div>
+
+            <!-- 文件列表 -->
+            <div class="bg-white dark:bg-gray-900 rounded-lg overflow-hidden shadow-sm border border-gray-200 dark:border-gray-700">
+              <table class="w-full">
+                <thead class="bg-gray-50 dark:bg-gray-800">
+                  <tr>
+                    <th class="w-8 p-2"></th>
+                    <th class="text-left p-2 font-medium text-gray-700 dark:text-gray-300">名称</th>
+                    <th class="text-left p-2 font-medium text-gray-700 dark:text-gray-300">大小</th>
+                    <th class="text-left p-2 font-medium text-gray-700 dark:text-gray-300">类型</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="file in getArchiveFilesInPath()"
+                    :key="file.path"
+                    @click="handleArchiveFileClick(file)"
+                    class="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 border-b border-gray-100 dark:border-gray-700"
+                  >
+                    <td class="p-2">
+                      <div class="flex items-center justify-center">
+                        <svg v-if="file.isDirectory" class="w-5 h-5 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
+                        </svg>
+                        <svg v-else class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                      </div>
+                    </td>
+                    <td class="p-2 font-medium text-gray-900 dark:text-white">{{ file.name }}</td>
+                    <td class="p-2 text-sm text-gray-500">
+                      {{ file.isDirectory ? '-' : formatFileSize(file.size) }}
+                    </td>
+                    <td class="p-2 text-sm text-gray-500">
+                      {{ file.isDirectory ? '文件夹' : '文件' }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div v-if="getArchiveFilesInPath().length === 0" class="p-8 text-center text-gray-500 dark:text-gray-400">
+                此目录为空
+              </div>
+            </div>
+
+            <!-- 压缩包信息 -->
+            <div class="mt-4 text-xs text-gray-500 dark:text-gray-400">
+              压缩包格式: {{ archiveInfo.format.toUpperCase() }} |
+              总文件数: {{ archiveInfo.entries.length }} |
+              压缩大小: {{ formatFileSize(archiveInfo.compressed_size || 0) }} |
+              原始大小: {{ formatFileSize(archiveInfo.uncompressed_size || 0) }}
+            </div>
+          </div>
+
+          <div v-else class="text-center text-gray-500 dark:text-gray-400 py-8">
+            <div class="flex flex-col items-center space-y-4">
+              <svg class="w-16 h-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+              <div>
+                <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">无法读取压缩包</h3>
+                <p class="text-gray-500 dark:text-gray-400">
+                  此ZIP文件可能太大或格式不支持
+                </p>
+                <p class="text-sm text-gray-400 dark:text-gray-500 mt-2">
+                  当前版本支持小于64KB的ZIP文件预览
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ZIP浏览底部 -->
+        <div class="flex items-center justify-end p-4 border-t border-gray-200 dark:border-gray-700 space-x-2">
+          <button
+            @click="closeArchiveBrowse"
+            class="btn btn-secondary btn-sm"
+          >
+            关闭
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 文件预览对话框 -->
+    <div
+      v-if="isPreviewOpen"
+      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+      @click="closeFilePreview"
+    >
+      <div
+        class="bg-white dark:bg-gray-800 rounded-lg max-w-4xl w-full max-h-[80vh] flex flex-col"
+        @click.stop
+      >
+        <!-- 预览头部 -->
+        <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+          <div>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ previewFile?.filename }}
+            </h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400">
+              大小: {{ formatFileSize(parseInt(previewFile?.size || '0')) }}
+            </p>
+          </div>
+          <button
+            @click="closeFilePreview"
+            class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+          >
+            <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- 预览内容 -->
+        <div class="flex-1 overflow-hidden">
+          <div v-if="isLoadingContent" class="flex items-center justify-center h-64">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          </div>
+          <div v-else-if="fileContent" class="h-full">
+            <!-- 检查是否为文本文件且内容较大，使用虚拟化查看器 -->
+            <VirtualizedTextViewer
+              v-if="shouldUseVirtualizedViewer"
+              :content="fileContent"
+              :fileName="previewFile?.filename || ''"
+              :onScrollToBottom="loadMoreContent"
+              class="h-full"
+            />
+            <!-- 小文件使用普通预览 -->
+            <div v-else class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 h-full overflow-auto">
+              <pre class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{{ fileContent }}</pre>
+            </div>
+          </div>
+          <div v-else class="flex items-center justify-center h-64">
+            <div class="text-center text-gray-500 dark:text-gray-400">
+              无法预览此文件内容
+            </div>
+          </div>
+        </div>
+
+        <!-- 预览底部 -->
+        <div class="flex items-center justify-end p-4 border-t border-gray-200 dark:border-gray-700 space-x-2">
+          <button
+            @click.stop="downloadFile(previewFile)"
+            class="btn btn-outline btn-sm"
+          >
+            下载
+          </button>
+          <button
+            @click="closeFilePreview"
+            class="btn btn-secondary btn-sm"
+          >
+            关闭
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { ConnectionCacheService } from '@/services/storage/ConnectionCacheService'
+import VirtualizedTextViewer from '@/components/VirtualizedTextViewer.vue'
 
 const appStore = useAppStore()
 
@@ -317,9 +716,171 @@ const isLoading = ref(false)
 const currentPath = ref('')
 const files = ref<any[]>([])
 
+// 文件预览状态
+const isPreviewOpen = ref(false)
+const previewFile = ref<any>(null)
+
+// ZIP文件浏览状态
+const isArchiveBrowseOpen = ref(false)
+const archiveFile = ref<any>(null)
+const archiveInfo = ref<any>(null)
+const isLoadingArchive = ref(false)
+const archiveCurrentPath = ref('')
+const fileContent = ref('')
+const isLoadingContent = ref(false)
+const fileLoadOffset = ref(0)
+const fileLoadedSize = ref(0)
+const fileTotalSize = ref(0)
+
+// 虚拟化查看器配置
+const VIRTUAL_VIEWER_THRESHOLD = 100 * 1024 // 100KB
+const CHUNK_SIZE = 1024 * 1024 // 1MB per chunk
+
+// OSS配置状态
+const ossConfig = reactive({
+  platform: 'aliyun',
+  region: 'cn-hangzhou',
+  customEndpoint: ''
+})
+
+// 缓存状态
+const allCacheInfo = ref<Array<{ storageType: string; lastUsed: string; config: any }>>([])
+const hasAnyCache = computed(() => allCacheInfo.value.length > 0)
+
+// OSS平台配置数据
+const ossPlatforms = {
+  aliyun: {
+    name: '阿里云 OSS',
+    defaultRegion: 'cn-hangzhou',
+    regions: [
+      { id: 'cn-hangzhou', name: '华东1（杭州）', endpoint: 'https://oss-cn-hangzhou.aliyuncs.com' },
+      { id: 'cn-shanghai', name: '华东2（上海）', endpoint: 'https://oss-cn-shanghai.aliyuncs.com' },
+      { id: 'cn-qingdao', name: '华北1（青岛）', endpoint: 'https://oss-cn-qingdao.aliyuncs.com' },
+      { id: 'cn-beijing', name: '华北2（北京）', endpoint: 'https://oss-cn-beijing.aliyuncs.com' },
+      { id: 'cn-zhangjiakou', name: '华北3（张家口）', endpoint: 'https://oss-cn-zhangjiakou.aliyuncs.com' },
+      { id: 'cn-huhehaote', name: '华北5（呼和浩特）', endpoint: 'https://oss-cn-huhehaote.aliyuncs.com' },
+      { id: 'cn-wulanchabu', name: '华北6（乌兰察布）', endpoint: 'https://oss-cn-wulanchabu.aliyuncs.com' },
+      { id: 'cn-shenzhen', name: '华南1（深圳）', endpoint: 'https://oss-cn-shenzhen.aliyuncs.com' },
+      { id: 'cn-heyuan', name: '华南2（河源）', endpoint: 'https://oss-cn-heyuan.aliyuncs.com' },
+      { id: 'cn-guangzhou', name: '华南3（广州）', endpoint: 'https://oss-cn-guangzhou.aliyuncs.com' },
+      { id: 'cn-chengdu', name: '西南1（成都）', endpoint: 'https://oss-cn-chengdu.aliyuncs.com' },
+      { id: 'cn-hongkong', name: '中国香港', endpoint: 'https://oss-cn-hongkong.aliyuncs.com' },
+      { id: 'us-west-1', name: '美国西部1（硅谷）', endpoint: 'https://oss-us-west-1.aliyuncs.com' },
+      { id: 'us-east-1', name: '美国东部1（弗吉尼亚）', endpoint: 'https://oss-us-east-1.aliyuncs.com' },
+      { id: 'ap-southeast-1', name: '亚太东南1（新加坡）', endpoint: 'https://oss-ap-southeast-1.aliyuncs.com' },
+      { id: 'ap-southeast-2', name: '亚太东南2（悉尼）', endpoint: 'https://oss-ap-southeast-2.aliyuncs.com' },
+      { id: 'ap-southeast-3', name: '亚太东南3（吉隆坡）', endpoint: 'https://oss-ap-southeast-3.aliyuncs.com' },
+      { id: 'ap-southeast-5', name: '亚太东南5（雅加达）', endpoint: 'https://oss-ap-southeast-5.aliyuncs.com' },
+      { id: 'ap-northeast-1', name: '亚太东北1（日本）', endpoint: 'https://oss-ap-northeast-1.aliyuncs.com' },
+      { id: 'ap-south-1', name: '亚太南部1（孟买）', endpoint: 'https://oss-ap-south-1.aliyuncs.com' },
+      { id: 'eu-central-1', name: '欧洲中部1（法兰克福）', endpoint: 'https://oss-eu-central-1.aliyuncs.com' },
+      { id: 'eu-west-1', name: '英国（伦敦）', endpoint: 'https://oss-eu-west-1.aliyuncs.com' },
+      { id: 'me-east-1', name: '中东东部1（迪拜）', endpoint: 'https://oss-me-east-1.aliyuncs.com' }
+    ]
+  },
+  tencent: {
+    name: '腾讯云 COS',
+    defaultRegion: 'ap-beijing',
+    regions: [
+      { id: 'ap-beijing-1', name: '北京一区', endpoint: 'https://cos.ap-beijing-1.myqcloud.com' },
+      { id: 'ap-beijing', name: '北京', endpoint: 'https://cos.ap-beijing.myqcloud.com' },
+      { id: 'ap-nanjing', name: '南京', endpoint: 'https://cos.ap-nanjing.myqcloud.com' },
+      { id: 'ap-shanghai', name: '上海', endpoint: 'https://cos.ap-shanghai.myqcloud.com' },
+      { id: 'ap-guangzhou', name: '广州', endpoint: 'https://cos.ap-guangzhou.myqcloud.com' },
+      { id: 'ap-chengdu', name: '成都', endpoint: 'https://cos.ap-chengdu.myqcloud.com' },
+      { id: 'ap-chongqing', name: '重庆', endpoint: 'https://cos.ap-chongqing.myqcloud.com' },
+      { id: 'ap-shenzhen-fsi', name: '深圳金融', endpoint: 'https://cos.ap-shenzhen-fsi.myqcloud.com' },
+      { id: 'ap-shanghai-fsi', name: '上海金融', endpoint: 'https://cos.ap-shanghai-fsi.myqcloud.com' },
+      { id: 'ap-beijing-fsi', name: '北京金融', endpoint: 'https://cos.ap-beijing-fsi.myqcloud.com' },
+      { id: 'ap-hongkong', name: '中国香港', endpoint: 'https://cos.ap-hongkong.myqcloud.com' },
+      { id: 'ap-singapore', name: '新加坡', endpoint: 'https://cos.ap-singapore.myqcloud.com' },
+      { id: 'ap-mumbai', name: '孟买', endpoint: 'https://cos.ap-mumbai.myqcloud.com' },
+      { id: 'ap-jakarta', name: '雅加达', endpoint: 'https://cos.ap-jakarta.myqcloud.com' },
+      { id: 'ap-seoul', name: '首尔', endpoint: 'https://cos.ap-seoul.myqcloud.com' },
+      { id: 'ap-bangkok', name: '曼谷', endpoint: 'https://cos.ap-bangkok.myqcloud.com' },
+      { id: 'ap-tokyo', name: '东京', endpoint: 'https://cos.ap-tokyo.myqcloud.com' },
+      { id: 'na-siliconvalley', name: '硅谷', endpoint: 'https://cos.na-siliconvalley.myqcloud.com' },
+      { id: 'na-ashburn', name: '弗吉尼亚', endpoint: 'https://cos.na-ashburn.myqcloud.com' },
+      { id: 'na-toronto', name: '多伦多', endpoint: 'https://cos.na-toronto.myqcloud.com' },
+      { id: 'eu-frankfurt', name: '法兰克福', endpoint: 'https://cos.eu-frankfurt.myqcloud.com' },
+      { id: 'eu-moscow', name: '莫斯科', endpoint: 'https://cos.eu-moscow.myqcloud.com' }
+    ]
+  },
+  aws: {
+    name: 'AWS S3',
+    defaultRegion: 'us-east-1',
+    regions: [
+      { id: 'us-east-1', name: '默认区域 - US East (N. Virginia)', endpoint: 'https://s3.amazonaws.com' },
+      { id: 'us-east-2', name: 'US East (Ohio)', endpoint: 'https://s3.us-east-2.amazonaws.com' },
+      { id: 'us-west-1', name: 'US West (N. California)', endpoint: 'https://s3.us-west-1.amazonaws.com' },
+      { id: 'us-west-2', name: 'US West (Oregon)', endpoint: 'https://s3.us-west-2.amazonaws.com' },
+      { id: 'ap-south-1', name: 'Asia Pacific (Mumbai)', endpoint: 'https://s3.ap-south-1.amazonaws.com' },
+      { id: 'ap-northeast-1', name: 'Asia Pacific (Tokyo)', endpoint: 'https://s3.ap-northeast-1.amazonaws.com' },
+      { id: 'ap-northeast-2', name: 'Asia Pacific (Seoul)', endpoint: 'https://s3.ap-northeast-2.amazonaws.com' },
+      { id: 'ap-northeast-3', name: 'Asia Pacific (Osaka)', endpoint: 'https://s3.ap-northeast-3.amazonaws.com' },
+      { id: 'ap-southeast-1', name: 'Asia Pacific (Singapore)', endpoint: 'https://s3.ap-southeast-1.amazonaws.com' },
+      { id: 'ap-southeast-2', name: 'Asia Pacific (Sydney)', endpoint: 'https://s3.ap-southeast-2.amazonaws.com' },
+      { id: 'ca-central-1', name: 'Canada (Central)', endpoint: 'https://s3.ca-central-1.amazonaws.com' },
+      { id: 'eu-central-1', name: 'Europe (Frankfurt)', endpoint: 'https://s3.eu-central-1.amazonaws.com' },
+      { id: 'eu-west-1', name: 'Europe (Ireland)', endpoint: 'https://s3.eu-west-1.amazonaws.com' },
+      { id: 'eu-west-2', name: 'Europe (London)', endpoint: 'https://s3.eu-west-2.amazonaws.com' },
+      { id: 'eu-west-3', name: 'Europe (Paris)', endpoint: 'https://s3.eu-west-3.amazonaws.com' },
+      { id: 'eu-north-1', name: 'Europe (Stockholm)', endpoint: 'https://s3.eu-north-1.amazonaws.com' },
+      { id: 'sa-east-1', name: 'South America (São Paulo)', endpoint: 'https://s3.sa-east-1.amazonaws.com' }
+    ]
+  },
+  huawei: {
+    name: '华为云 OBS',
+    defaultRegion: 'cn-north-1',
+    regions: [
+      { id: 'cn-north-1', name: '华北-北京一', endpoint: 'https://obs.cn-north-1.myhuaweicloud.com' },
+      { id: 'cn-north-4', name: '华北-北京四', endpoint: 'https://obs.cn-north-4.myhuaweicloud.com' },
+      { id: 'cn-north-9', name: '华北-乌兰察布一', endpoint: 'https://obs.cn-north-9.myhuaweicloud.com' },
+      { id: 'cn-east-2', name: '华东-上海二', endpoint: 'https://obs.cn-east-2.myhuaweicloud.com' },
+      { id: 'cn-east-3', name: '华东-上海一', endpoint: 'https://obs.cn-east-3.myhuaweicloud.com' },
+      { id: 'cn-south-1', name: '华南-广州', endpoint: 'https://obs.cn-south-1.myhuaweicloud.com' },
+      { id: 'cn-southwest-2', name: '西南-贵阳一', endpoint: 'https://obs.cn-southwest-2.myhuaweicloud.com' },
+      { id: 'ap-southeast-1', name: '亚太-香港', endpoint: 'https://obs.ap-southeast-1.myhuaweicloud.com' },
+      { id: 'ap-southeast-2', name: '亚太-曼谷', endpoint: 'https://obs.ap-southeast-2.myhuaweicloud.com' },
+      { id: 'ap-southeast-3', name: '亚太-新加坡', endpoint: 'https://obs.ap-southeast-3.myhuaweicloud.com' },
+      { id: 'af-south-1', name: '非洲-约翰内斯堡', endpoint: 'https://obs.af-south-1.myhuaweicloud.com' }
+    ]
+  },
+  minio: {
+    name: 'MinIO',
+    defaultRegion: 'us-east-1',
+    regions: [
+      { id: 'us-east-1', name: 'Default Region', endpoint: 'http://localhost:9000' }
+    ]
+  },
+  custom: {
+    name: '自定义',
+    defaultRegion: '',
+    regions: []
+  }
+}
+
 // 计算属性
 const pathSegments = computed(() => {
   return currentPath.value.split('/').filter(Boolean)
+})
+
+// 判断是否使用虚拟化查看器
+const shouldUseVirtualizedViewer = computed(() => {
+  if (!previewFile.value) return false
+
+  const fileName = previewFile.value.filename || ''
+  const fileSize = parseInt(previewFile.value.size || '0')
+
+  // 检查文件扩展名是否为文本类型
+  const textExtensions = ['.txt', '.log', '.csv', '.json', '.xml', '.md', '.yml', '.yaml',
+    '.js', '.ts', '.jsx', '.tsx', '.vue', '.html', '.css', '.scss', '.sass', '.py', '.java',
+    '.cpp', '.c', '.h', '.go', '.rs', '.php', '.rb', '.sh', '.sql', '.conf', '.ini']
+
+  const isTextFile = textExtensions.some(ext => fileName.toLowerCase().endsWith(ext))
+
+  // 文本文件且大于阈值时使用虚拟化查看器
+  return isTextFile && (fileSize > VIRTUAL_VIEWER_THRESHOLD || fileContent.value.length > 1000)
 })
 
 // 重置配置
@@ -333,7 +894,102 @@ watch(selectedStorageType, (newType) => {
     username: '',
     password: '',
   })
+
+  // 重置OSS配置
+  if (newType === 'oss') {
+    ossConfig.platform = 'aliyun'
+    ossConfig.region = 'cn-hangzhou'
+    ossConfig.customEndpoint = ''
+    updateConnectionEndpoint()
+  }
 })
+
+// 缓存相关功能
+const loadCachedConfig = () => {
+  const cached = ConnectionCacheService.loadConnectionConfig()
+  if (cached) {
+    // 更新存储类型
+    selectedStorageType.value = cached.storageType
+
+    // 重置并更新连接配置
+    Object.assign(connectionConfig, {
+      url: cached.storageType === 'local' ? '/tmp' : '',
+      endpoint: '',
+      bucket: '',
+      access_key: '',
+      secret_key: '',
+      username: '',
+      password: '',
+    }, cached.connectionConfig)
+
+    // 更新OSS配置
+    Object.assign(ossConfig, cached.ossConfig)
+
+    // 更新连接端点
+    updateConnectionEndpoint()
+
+    // 显示成功提示
+    appStore.setGlobalError('')  // 清除可能存在的错误信息
+    console.log('已自动填写缓存的连接配置')
+  } else {
+    console.log('没有找到可用的缓存配置')
+  }
+}
+
+const loadSpecificCacheConfig = (storageType: string) => {
+  const cached = ConnectionCacheService.loadConnectionConfig(storageType)
+  if (cached) {
+    // 更新存储类型
+    selectedStorageType.value = cached.storageType
+
+    // 重置并更新连接配置
+    Object.assign(connectionConfig, {
+      url: cached.storageType === 'local' ? '/tmp' : '',
+      endpoint: '',
+      bucket: '',
+      access_key: '',
+      secret_key: '',
+      username: '',
+      password: '',
+    }, cached.connectionConfig)
+
+    // 更新OSS配置
+    Object.assign(ossConfig, cached.ossConfig)
+
+    // 更新连接端点
+    updateConnectionEndpoint()
+
+    // 显示成功提示
+    appStore.setGlobalError('')  // 清除可能存在的错误信息
+    console.log(`已加载${ConnectionCacheService.getStorageTypeName(storageType)}的缓存配置`)
+  } else {
+    console.log(`没有找到${ConnectionCacheService.getStorageTypeName(storageType)}的缓存配置`)
+  }
+}
+
+const saveCacheConfig = () => {
+  if (isConnected.value) {
+    ConnectionCacheService.saveConnectionConfig(
+      selectedStorageType.value,
+      connectionConfig,
+      ossConfig
+    )
+  }
+}
+
+const clearCache = () => {
+  ConnectionCacheService.clearCache()
+  updateCacheInfo()
+}
+
+const clearSpecificCache = (storageType: string) => {
+  ConnectionCacheService.clearCache(storageType)
+  updateCacheInfo()
+}
+
+const updateCacheInfo = () => {
+  allCacheInfo.value = ConnectionCacheService.getAllCacheInfo()
+}
 
 // 连接存储
 const connect = async () => {
@@ -373,6 +1029,7 @@ const connect = async () => {
       isConnected.value = true
       sessionId.value = data.data.session_id
       await loadFiles('')
+      saveCacheConfig() // 保存连接配置到缓存
     } else {
       appStore.setGlobalError(`连接失败: ${data.message}`)
     }
@@ -427,14 +1084,39 @@ const refreshFiles = () => {
   loadFiles(currentPath.value)
 }
 
+// 导航到指定路径
+const navigateToPath = (path: string) => {
+  loadFiles(path)
+}
+
+// 导航到上级目录
+const navigateToParent = () => {
+  if (currentPath.value) {
+    const pathParts = currentPath.value.split('/').filter(Boolean)
+    pathParts.pop() // 移除最后一个部分
+    const parentPath = pathParts.join('/')
+    loadFiles(parentPath)
+  }
+}
+
+// 检测是否为压缩包文件
+const isArchiveFile = (filename: string): boolean => {
+  const archiveExtensions = ['.zip', '.tar', '.gz', '.bz2']
+  const lowerFilename = filename.toLowerCase()
+  return archiveExtensions.some(ext => lowerFilename.endsWith(ext))
+}
+
 // 处理文件点击
 const handleFileClick = (file: any) => {
   if (file.type === 'directory') {
     const newPath = currentPath.value ? `${currentPath.value}/${file.basename}` : file.basename
     loadFiles(newPath)
+  } else if (isArchiveFile(file.basename)) {
+    // 浏览压缩包文件
+    openArchiveBrowse(file)
   } else {
-    // 预览文件（待实现）
-    console.log('Preview file:', file.filename)
+    // 预览文件
+    openFilePreview(file)
   }
 }
 
@@ -466,6 +1148,318 @@ const downloadFile = async (file: any) => {
   }
 }
 
+// 文件预览（支持大文件分块加载）
+const openFilePreview = async (file: any) => {
+  previewFile.value = file
+  isPreviewOpen.value = true
+  isLoadingContent.value = true
+  fileContent.value = ''
+  fileLoadOffset.value = 0
+  fileLoadedSize.value = 0
+  fileTotalSize.value = parseInt(file.size || '0')
+
+  try {
+    await loadFileChunk(file, 0, CHUNK_SIZE)
+  } catch (error) {
+    console.error('File preview failed:', error)
+    appStore.setGlobalError('文件预览失败')
+    isLoadingContent.value = false
+  }
+}
+
+// 加载文件块
+const loadFileChunk = async (file: any, offset: number, size: number) => {
+  const filePath = currentPath.value ? `${currentPath.value}/${file.basename}` : file.basename
+
+  try {
+    const response = await fetch(`/api/storage/${sessionId.value}/file/content`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        session_id: sessionId.value,
+        path: filePath,
+        start: offset > 0 ? offset : undefined,
+        length: size > 0 ? size : undefined,
+      }),
+    })
+
+    const data = await response.json()
+    if (data.status === 'success') {
+      // 将字节数组转换为文本
+      const content = data.data.content
+      const decoder = new TextDecoder('utf-8')
+      const uint8Array = new Uint8Array(content)
+      const chunkText = decoder.decode(uint8Array)
+
+      // 第一次加载或者追加内容
+      if (offset === 0) {
+        fileContent.value = chunkText
+      } else {
+        fileContent.value += chunkText
+      }
+
+      fileLoadOffset.value = offset + chunkText.length
+      fileLoadedSize.value += chunkText.length
+
+      // 如果是初始加载，显示内容
+      if (offset === 0) {
+        isLoadingContent.value = false
+      }
+    } else {
+      appStore.setGlobalError(`文件预览失败: ${data.message}`)
+      if (offset === 0) {
+        isLoadingContent.value = false
+      }
+    }
+  } catch (error) {
+    console.error('Load file chunk failed:', error)
+    appStore.setGlobalError('加载文件块失败')
+    if (offset === 0) {
+      isLoadingContent.value = false
+    }
+  }
+}
+
+// 加载更多内容（虚拟化查看器滚动到底部时调用）
+const loadMoreContent = async () => {
+  if (!previewFile.value || fileLoadedSize.value >= fileTotalSize.value) {
+    return
+  }
+
+  console.log('Loading more content...', {
+    loaded: fileLoadedSize.value,
+    total: fileTotalSize.value,
+    offset: fileLoadOffset.value
+  })
+
+  await loadFileChunk(previewFile.value, fileLoadOffset.value, CHUNK_SIZE)
+}
+
+const closeFilePreview = () => {
+  isPreviewOpen.value = false
+  previewFile.value = null
+  fileContent.value = ''
+}
+
+// 打开压缩包浏览
+const openArchiveBrowse = async (file: any) => {
+  archiveFile.value = file
+  isArchiveBrowseOpen.value = true
+  isLoadingArchive.value = true
+  archiveInfo.value = null
+  archiveCurrentPath.value = ''
+
+  try {
+    const filePath = currentPath.value ? `${currentPath.value}/${file.basename}` : file.basename
+    const response = await fetch(`/api/storage/${sessionId.value}/archive/info`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        file_path: filePath,
+        max_entries: 1000,
+      }),
+    })
+
+    const data = await response.json()
+    if (data.status === 'success') {
+      archiveInfo.value = data.data
+    } else {
+      appStore.setGlobalError(`无法读取压缩包: ${data.message}`)
+    }
+  } catch (error) {
+    console.error('Archive browse failed:', error)
+    appStore.setGlobalError('压缩包浏览失败')
+  } finally {
+    isLoadingArchive.value = false
+  }
+}
+
+// 关闭压缩包浏览
+const closeArchiveBrowse = () => {
+  isArchiveBrowseOpen.value = false
+  archiveFile.value = null
+  archiveInfo.value = null
+  archiveCurrentPath.value = ''
+}
+
+// 获取当前路径下的文件列表（用于Archive浏览）
+const getArchiveFilesInPath = () => {
+  if (!archiveInfo.value) return []
+
+  const currentPathParts = archiveCurrentPath.value ? archiveCurrentPath.value.split('/').filter(Boolean) : []
+  const files: any[] = []
+  const directories = new Set<string>()
+
+  archiveInfo.value.entries.forEach((entry: any) => {
+    const pathParts = entry.path.split('/').filter(Boolean)
+
+    // 如果文件不在当前路径下，跳过
+    if (pathParts.length <= currentPathParts.length) return
+
+    // 检查路径前缀是否匹配
+    for (let i = 0; i < currentPathParts.length; i++) {
+      if (pathParts[i] !== currentPathParts[i]) return
+    }
+
+    const nextPart = pathParts[currentPathParts.length]
+
+    // 如果这是直接子文件（没有更深层的路径）
+    if (pathParts.length === currentPathParts.length + 1) {
+      files.push({
+        name: nextPart,
+        type: 'file',
+        size: entry.size,
+        path: entry.path,
+        isDirectory: false
+      })
+    } else {
+      // 这是一个目录
+      directories.add(nextPart)
+    }
+  })
+
+  // 添加目录
+  directories.forEach(dirName => {
+    files.unshift({
+      name: dirName,
+      type: 'directory',
+      size: 0,
+      path: archiveCurrentPath.value ? `${archiveCurrentPath.value}/${dirName}` : dirName,
+      isDirectory: true
+    })
+  })
+
+  return files.sort((a, b) => {
+    if (a.isDirectory && !b.isDirectory) return -1
+    if (!a.isDirectory && b.isDirectory) return 1
+    return a.name.localeCompare(b.name)
+  })
+}
+
+// 处理Archive文件点击
+const handleArchiveFileClick = (archiveFileItem: any) => {
+  if (archiveFileItem.isDirectory) {
+    archiveCurrentPath.value = archiveFileItem.path
+  } else {
+    openArchiveFilePreview(archiveFileItem)
+  }
+}
+
+// 导航到Archive父目录
+const navigateToArchiveParent = () => {
+  if (archiveCurrentPath.value) {
+    const parts = archiveCurrentPath.value.split('/').filter(Boolean)
+    parts.pop()
+    archiveCurrentPath.value = parts.join('/')
+  }
+}
+
+// 预览Archive中的文件
+const openArchiveFilePreview = async (archiveFileItem: any) => {
+  isLoadingContent.value = true
+  fileContent.value = ''
+
+  try {
+    const archiveFilePath = currentPath.value ? `${currentPath.value}/${archiveFile.value.basename}` : archiveFile.value.basename
+    const response = await fetch(`/api/storage/${sessionId.value}/archive/file`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        archive_path: archiveFilePath,
+        file_path: archiveFileItem.path,
+        max_size: 10 * 1024 * 1024, // 10MB 限制
+      }),
+    })
+
+    const data = await response.json()
+    if (data.status === 'success') {
+      // 设置预览文件信息
+      previewFile.value = {
+        filename: archiveFileItem.name,
+        size: archiveFileItem.size.toString(),
+        path: archiveFileItem.path,
+        isArchiveFile: true
+      }
+
+      // 将字节数组转换为文本
+      const content = data.data.content
+      const decoder = new TextDecoder('utf-8')
+      const uint8Array = new Uint8Array(content)
+      fileContent.value = decoder.decode(uint8Array)
+
+      // 关闭Archive浏览，打开文件预览
+      closeArchiveBrowse()
+      isPreviewOpen.value = true
+    } else {
+      appStore.setGlobalError(`无法预览文件: ${data.message}`)
+    }
+  } catch (error) {
+    console.error('Archive file preview failed:', error)
+    appStore.setGlobalError('文件预览失败')
+  } finally {
+    isLoadingContent.value = false
+  }
+}
+
+// OSS平台和地域处理方法
+const getCurrentRegions = () => {
+  const platform = ossPlatforms[ossConfig.platform as keyof typeof ossPlatforms]
+  return platform ? platform.regions : []
+}
+
+const getCurrentEndpoint = () => {
+  if (ossConfig.platform === 'custom') {
+    return ossConfig.customEndpoint || '请输入自定义端点'
+  }
+
+  const platform = ossPlatforms[ossConfig.platform as keyof typeof ossPlatforms]
+  if (!platform) return ''
+
+  const region = platform.regions.find(r => r.id === ossConfig.region)
+  return region ? region.endpoint : platform.regions[0]?.endpoint || ''
+}
+
+const handlePlatformChange = () => {
+  const platform = ossPlatforms[ossConfig.platform as keyof typeof ossPlatforms]
+  if (platform) {
+    if (ossConfig.platform === 'custom') {
+      ossConfig.region = ''
+      ossConfig.customEndpoint = ''
+      connectionConfig.endpoint = ''
+    } else {
+      ossConfig.region = platform.defaultRegion || platform.regions[0]?.id || ''
+      ossConfig.customEndpoint = ''
+      updateConnectionEndpoint()
+    }
+  }
+}
+
+const handleRegionChange = () => {
+  updateConnectionEndpoint()
+}
+
+const handleCustomEndpointChange = () => {
+  if (ossConfig.platform === 'custom') {
+    connectionConfig.endpoint = ossConfig.customEndpoint
+  }
+}
+
+const updateConnectionEndpoint = () => {
+  if (ossConfig.platform !== 'custom') {
+    const platform = ossPlatforms[ossConfig.platform as keyof typeof ossPlatforms]
+    if (platform) {
+      const region = platform.regions.find(r => r.id === ossConfig.region)
+      connectionConfig.endpoint = region ? region.endpoint : ''
+    }
+  }
+}
+
 // 工具函数
 const formatFileSize = (bytes: number): string => {
   if (bytes === 0) return '0 B'
@@ -489,4 +1483,9 @@ const formatDate = (dateString: string): string => {
     return dateString
   }
 }
+
+// 组件挂载时更新缓存信息（不自动加载，让用户手动选择）
+onMounted(() => {
+  updateCacheInfo()
+})
 </script>

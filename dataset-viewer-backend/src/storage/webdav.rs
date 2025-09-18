@@ -22,13 +22,16 @@ impl WebDAVClient {
             .clone()
             .ok_or_else(|| StorageError::InvalidConfig("WebDAV URL is required".to_string()))?;
 
+        let username = config.username.clone();
+        let password = config.password.clone();
+
         Ok(Self {
             client: Client::new(),
             config,
             connected: false,
             base_url,
-            username: config.username.clone(),
-            password: config.password.clone(),
+            username,
+            password,
         })
     }
 }

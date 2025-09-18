@@ -38,12 +38,22 @@ pub struct ConnectResponse {
     pub connected: bool,
 }
 
+/// 列表选项
+#[derive(Debug, Deserialize)]
+pub struct ListRequestOptions {
+    pub page_size: Option<u32>,
+    pub marker: Option<String>,
+    pub sort_by: Option<String>,
+    pub sort_order: Option<String>,
+    pub filter: Option<String>,
+}
+
 /// 文件列表请求
 #[derive(Debug, Deserialize)]
 pub struct ListRequest {
     pub session_id: String,
     pub path: Option<String>,
-    pub options: Option<ListOptions>,
+    pub options: Option<ListRequestOptions>,
 }
 
 /// 文件内容请求

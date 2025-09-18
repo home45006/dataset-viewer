@@ -62,13 +62,29 @@ impl StorageManager {
         Ok(session_id)
     }
 
-    /// 获取客户端
-    pub async fn get_client(&self, session_id: &str) -> Result<Arc<RwLock<Box<dyn StorageClient>>>, StorageError> {
+    /// 获取客户端引用（临时实现，用于目录列表功能）
+    pub async fn with_client<T, F>(&self, session_id: &str, f: F) -> Result<T, StorageError>
+    where
+        F: FnOnce(&dyn StorageClient) -> T,
+    {
         let connections = self.connections.read().await;
-        if connections.contains_key(session_id) {
-            // 这里需要返回一个可以安全共享的客户端引用
-            // 由于 trait object 的限制，我们需要重新设计这部分
+        if let Some(client) = connections.get(session_id) {
+            Ok(f(client.as_ref()))
+        } else {
             Err(StorageError::NotConnected)
+        }
+    }
+
+    /// 列出目录内容的便利方法
+    pub async fn list_directory(
+        &self,
+        session_id: &str,
+        path: &str,
+        options: Option<&crate::storage::ListOptions>,
+    ) -> Result<crate::storage::DirectoryResult, StorageError> {
+        let connections = self.connections.read().await;
+        if let Some(client) = connections.get(session_id) {
+            client.list_directory(path, options).await
         } else {
             Err(StorageError::NotConnected)
         }
@@ -128,5 +144,63 @@ impl StorageManager {
     pub async fn session_exists(&self, session_id: &str) -> bool {
         let connections = self.connections.read().await;
         connections.contains_key(session_id)
+    }
+
+    /// 获取文件内容的便利方法
+    pub async fn get_file_content(
+        &self,
+        session_id: &str,
+        path: &str,
+        start: Option<u64>,
+        length: Option<u64>,
+    ) -> Result<crate::storage::FileContent, StorageError> {
+        let connections = self.connections.read().await;
+        if let Some(client) = connections.get(session_id) {
+            client.get_file_content(path, start, length).await
+        } else {
+            Err(StorageError::NotConnected)
+        }
+    }
+
+    /// 获取会话客户端
+    pub async fn get_session_client(&self, session_id: &str) -> Option<Arc<dyn StorageClient>> {
+        let connections = self.connections.read().await;
+        if let Some(client) = connections.get(session_id) {
+            // 注意：这里需要克隆 Arc 引用，但是 Box<dyn StorageClient> 不能直接转换为 Arc<dyn StorageClient>
+            // 我们需要一个不同的方法
+            None
+        } else {
+            None
+        }
+    }
+
+    /// 获取文件大小的便利方法
+    pub async fn get_file_size(
+        &self,
+        session_id: &str,
+        path: &str,
+    ) -> Result<u64, StorageError> {
+        let connections = self.connections.read().await;
+        if let Some(client) = connections.get(session_id) {
+            client.get_file_size(path).await
+        } else {
+            Err(StorageError::NotConnected)
+        }
+    }
+
+    /// 读取文件范围的便利方法
+    pub async fn read_file_range(
+        &self,
+        session_id: &str,
+        path: &str,
+        start: u64,
+        length: u64,
+    ) -> Result<Vec<u8>, StorageError> {
+        let connections = self.connections.read().await;
+        if let Some(client) = connections.get(session_id) {
+            client.read_file_range(path, start, length).await
+        } else {
+            Err(StorageError::NotConnected)
+        }
     }
 }

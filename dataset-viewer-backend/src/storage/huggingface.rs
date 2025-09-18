@@ -15,11 +15,13 @@ pub struct HuggingFaceClient {
 
 impl HuggingFaceClient {
     pub fn new(config: ConnectionConfig) -> Result<Self, StorageError> {
+        let api_token = config.password.clone(); // 使用 password 字段存储 API token
+
         Ok(Self {
             client: Client::new(),
             config,
             connected: false,
-            api_token: config.password.clone(), // 使用 password 字段存储 API token
+            api_token,
         })
     }
 }

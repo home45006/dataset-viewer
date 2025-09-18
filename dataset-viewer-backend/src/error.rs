@@ -39,6 +39,9 @@ pub enum Error {
     #[error("WebSocket 错误: {0}")]
     WebSocket(String),
 
+    #[error("请求错误: {0}")]
+    BadRequest(String),
+
     #[error("序列化错误: {0}")]
     Serialization(#[from] serde_json::Error),
 
@@ -72,6 +75,7 @@ impl Error {
             Error::Network(_) => StatusCode::BAD_GATEWAY,
             Error::Archive(_) => StatusCode::BAD_REQUEST,
             Error::WebSocket(_) => StatusCode::BAD_REQUEST,
+            Error::BadRequest(_) => StatusCode::BAD_REQUEST,
             Error::Serialization(_) => StatusCode::BAD_REQUEST,
             Error::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Error::Http(_) => StatusCode::BAD_GATEWAY,
@@ -90,6 +94,7 @@ impl Error {
             Error::Network(_) => "NETWORK_ERROR",
             Error::Archive(_) => "ARCHIVE_ERROR",
             Error::WebSocket(_) => "WEBSOCKET_ERROR",
+            Error::BadRequest(_) => "BAD_REQUEST",
             Error::Serialization(_) => "SERIALIZATION_ERROR",
             Error::Io(_) => "IO_ERROR",
             Error::Http(_) => "HTTP_ERROR",

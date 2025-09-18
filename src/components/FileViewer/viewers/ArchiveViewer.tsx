@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Archive, Copy, Folder, Download, Loader2 } from 'lucide-react';
 import { ArchiveEntry, ArchiveInfo, FilePreview } from '../../../types';
-import { CompressionService } from '../../../services/compression';
+import { UnifiedCompressionService } from '../../../services/webCompressionService';
 import { StorageServiceManager } from '../../../services/storage/StorageManager';
 import { copyToClipboard, showCopyToast, showToast } from '../../../utils/clipboard';
 import {
@@ -125,7 +125,7 @@ export const ArchiveViewer: React.FC<ArchiveViewerProps> = ({ url, filename, sto
       } else {
         // 回退到直接的压缩服务接口
         const maxSize = 1024 * 1024; // 1MB
-        info = await CompressionService.analyzeArchive(url, filename, maxSize);
+        info = await UnifiedCompressionService.analyzeArchive(url, filename, maxSize);
       }
 
       setArchiveInfo(info);
@@ -157,7 +157,7 @@ export const ArchiveViewer: React.FC<ArchiveViewerProps> = ({ url, filename, sto
         detailedInfo = await storageClient.analyzeArchive(url, filename);
       } else {
         // 回退到直接的压缩服务接口
-        detailedInfo = await CompressionService.analyzeArchive(
+        detailedInfo = await UnifiedCompressionService.analyzeArchive(
           url,
           filename,
           undefined // 无大小限制
@@ -256,7 +256,7 @@ export const ArchiveViewer: React.FC<ArchiveViewerProps> = ({ url, filename, sto
         if (storageClient && storageClient.getArchiveFilePreview) {
           preview = await storageClient.getArchiveFilePreview(url, filename, entry.path, loadSize);
         } else {
-          preview = await CompressionService.extractFilePreview(
+          preview = await UnifiedCompressionService.extractFilePreview(
             url,
             filename,
             entry.path,
@@ -285,7 +285,7 @@ export const ArchiveViewer: React.FC<ArchiveViewerProps> = ({ url, filename, sto
           initialLoadSize
         );
       } else {
-        preview = await CompressionService.extractFilePreview(
+        preview = await UnifiedCompressionService.extractFilePreview(
           url,
           filename,
           entry.path,
@@ -401,9 +401,9 @@ export const ArchiveViewer: React.FC<ArchiveViewerProps> = ({ url, filename, sto
             return;
           }
         } else {
-          // CompressionService 目前不支持偏移量，需要加载完整文件
-          console.warn('CompressionService does not support offset loading, loading full file');
-          const fullPreview = await CompressionService.extractFilePreview(
+          // UnifiedCompressionService 目前不支持偏移量，需要加载完整文件
+          console.warn('UnifiedCompressionService does not support offset loading, loading full file');
+          const fullPreview = await UnifiedCompressionService.extractFilePreview(
             url,
             filename,
             entry.path,
@@ -521,7 +521,7 @@ export const ArchiveViewer: React.FC<ArchiveViewerProps> = ({ url, filename, sto
             safeParseInt(entry.size) || undefined // 加载完整文件
           );
         } else {
-          fullPreview = await CompressionService.extractFilePreview(
+          fullPreview = await UnifiedCompressionService.extractFilePreview(
             url,
             filename,
             entry.path,
@@ -570,7 +570,7 @@ export const ArchiveViewer: React.FC<ArchiveViewerProps> = ({ url, filename, sto
             safeParseInt(entry.size) || undefined // 加载完整文件
           );
         } else {
-          fullPreview = await CompressionService.extractFilePreview(
+          fullPreview = await UnifiedCompressionService.extractFilePreview(
             url,
             filename,
             entry.path,

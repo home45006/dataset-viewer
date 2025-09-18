@@ -25,11 +25,30 @@ impl LocalClient {
     /// 解析完整路径
     fn resolve_path(&self, path: &str) -> Result<std::path::PathBuf, StorageError> {
         let path = path.trim_start_matches('/');
-        
+
         if let Some(root) = &self.root_path {
-            Ok(Path::new(root).join(path))
+            // 如果根路径是绝对路径，直接使用
+            let root_path = Path::new(root);
+            if root_path.is_absolute() {
+                if path.is_empty() {
+                    Ok(root_path.to_path_buf())
+                } else {
+                    Ok(root_path.join(path))
+                }
+            } else {
+                Ok(Path::new(root).join(path))
+            }
         } else {
-            Ok(Path::new(path).to_path_buf())
+            // 处理绝对路径，包括Windows路径（如 C:\path）
+            let path_buf = Path::new(path);
+            if path_buf.is_absolute() {
+                Ok(path_buf.to_path_buf())
+            } else {
+                // 相对路径，相对于当前工作目录
+                let current_dir = std::env::current_dir()
+                    .map_err(|e| StorageError::IoError(format!("无法获取当前目录: {}", e)))?;
+                Ok(current_dir.join(path))
+            }
         }
     }
 
@@ -203,29 +222,32 @@ impl StorageClient for LocalClient {
         }
 
         // 应用分页
-        let (files, has_more) = if let Some(opts) = options {
+        let (files, has_more, files_count) = if let Some(opts) = options {
             if let Some(page_size) = opts.page_size {
                 let start = opts.marker.as_deref()
                     .and_then(|m| m.parse::<usize>().ok())
                     .unwrap_or(0);
                 let end = start + page_size as usize;
-                
+
                 let paginated = files.get(start..end.min(files.len())).unwrap_or(&[]).to_vec();
                 let has_more = end < files.len();
-                
-                (paginated, has_more)
+                let count = paginated.len();
+
+                (paginated, has_more, count)
             } else {
-                (files, false)
+                let count = files.len();
+                (files, false, count)
             }
         } else {
-            (files, false)
+            let count = files.len();
+            (files, false, count)
         };
 
         Ok(DirectoryResult {
             files,
             has_more,
             next_marker: if has_more {
-                Some((files.len()).to_string())
+                Some(files_count.to_string())
             } else {
                 None
             },
@@ -319,6 +341,29 @@ impl StorageClient for LocalClient {
 
     fn build_protocol_url(&self, path: &str) -> String {
         let resolved_path = self.resolve_path(path).unwrap_or_else(|_| path.into());
-        format!("file://{}", resolved_path.display())
+
+        // Windows路径需要特殊处理，确保正确的file://协议格式
+        let path_str = resolved_path.to_string_lossy();
+
+        #[cfg(windows)]
+        {
+            // Windows: C:\path -> file:///C:/path
+            if path_str.len() >= 2 && path_str.chars().nth(1) == Some(':') {
+                let normalized = path_str.replace('\\', "/");
+                format!("file:///{}", normalized)
+            } else {
+                format!("file://{}", path_str.replace('\\', "/"))
+            }
+        }
+
+        #[cfg(not(windows))]
+        {
+            // Unix/Linux: /path -> file:///path
+            if path_str.starts_with('/') {
+                format!("file://{}", path_str)
+            } else {
+                format!("file:///{}", path_str)
+            }
+        }
     }
 }

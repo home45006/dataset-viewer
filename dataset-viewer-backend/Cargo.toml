@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 # Web 框架
-axum = { version = "0.7", features = ["headers", "ws", "multipart"] }
+axum = { version = "0.7", features = ["ws", "multipart"] }
 tokio = { version = "1.0", features = ["full"] }
 tower = { version = "0.4", features = ["full"] }
 tower-http = { version = "0.5", features = ["fs", "cors", "trace", "limit"] }
@@ -17,6 +17,7 @@ serde_json = "1.0"
 
 # HTTP 客户端
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+
 
 # 异步
 async-trait = "0.1"
@@ -52,7 +53,9 @@ base64 = "0.22"
 url = "2.2"
 urlencoding = "2.1"
 hmac = "0.12"
+sha1 = "0.10"
 sha2 = "0.10"
+hex = "0.4"
 md5 = "0.7"
 
 # SSH 客户端
@@ -62,8 +65,8 @@ russh-keys = "0.45"
 # WebDAV 客户端 (基于 reqwest)
 # 将直接使用 reqwest 实现
 
-# SMB 客户端
-pavao = "0.3"
+# SMB 客户端 (Windows 下编译困难，暂时禁用)
+# pavao = "0.2"
 
 # 文件系统操作
 tempfile = "3.8"
@@ -86,3 +89,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "server"
 path = "src/main.rs"
+
+[[bin]]
+name = "test_zip"
+path = "src/bin/test_zip.rs"

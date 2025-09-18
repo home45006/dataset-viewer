@@ -19,7 +19,8 @@
     "back": "Back",
     "next": "Next",
     "previous": "Previous",
-    "submit": "Submit"
+    "submit": "Submit",
+    "theme": "Theme"
   },
   "nav": {
     "home": "Home",

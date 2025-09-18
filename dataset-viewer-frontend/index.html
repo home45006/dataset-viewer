@@ -18,7 +18,7 @@
     <!-- 防止 FOUC (Flash of Unstyled Content) -->
     <style>
       #app {
-        visibility: hidden;
+        min-height: 100vh;
       }
       
       .app-loading {
@@ -73,15 +73,21 @@
     <script>
       // 应用加载完成后隐藏加载动画
       document.addEventListener('DOMContentLoaded', function() {
-        const app = document.getElementById('app');
         const loading = document.getElementById('loading');
-        
-        setTimeout(() => {
-          app.style.visibility = 'visible';
-          if (loading) {
-            loading.remove();
+
+        // 等待Vue应用完全加载
+        const checkVueApp = () => {
+          const vueApp = document.querySelector('#app .min-h-screen');
+          if (vueApp) {
+            if (loading) {
+              loading.remove();
+            }
+          } else {
+            setTimeout(checkVueApp, 100);
           }
-        }, 100);
+        };
+
+        setTimeout(checkVueApp, 500);
       });
     </script>
     

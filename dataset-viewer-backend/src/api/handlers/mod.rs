@@ -57,9 +57,9 @@ pub async fn version() -> Json<ApiResponse<serde_json::Value>> {
         "name": env!("CARGO_PKG_NAME"),
         "version": env!("CARGO_PKG_VERSION"),
         "description": env!("CARGO_PKG_DESCRIPTION"),
-        "build_date": env!("BUILD_DATE", "unknown"),
-        "git_hash": env!("GIT_HASH", "unknown"),
-        "rust_version": env!("RUST_VERSION", "unknown"),
+        "build_date": "unknown",
+        "git_hash": "unknown",
+        "rust_version": "unknown",
     });
 
     Json(ApiResponse::success(version_info))

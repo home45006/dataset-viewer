@@ -87,9 +87,43 @@ pub async fn list_directory(
     Path(session_id): Path<String>,
     Json(request): Json<ListRequest>,
 ) -> Result<Json<ApiResponse<crate::storage::DirectoryResult>>, Error> {
-    // TODO: 实现目录列表逻辑
-    // 由于当前存储管理器设计的限制，这里先返回错误
-    Err(Error::Internal("Directory listing not yet implemented".to_string()))
+    // 检查会话是否存在
+    if !state.storage_manager.session_exists(&session_id).await {
+        return Err(Error::NotFound("Session not found".to_string()));
+    }
+
+    // 构建列表选项
+    let options = if let Some(opts) = &request.options {
+        crate::storage::ListOptions {
+            page_size: opts.page_size,
+            marker: opts.marker.clone(),
+            prefix: opts.filter.clone(), // 将filter映射到prefix
+            recursive: Some(false),
+            sort_by: opts.sort_by.clone(),
+            sort_order: opts.sort_order.clone(),
+        }
+    } else {
+        crate::storage::ListOptions {
+            page_size: None,
+            marker: None,
+            prefix: None,
+            recursive: Some(false),
+            sort_by: None,
+            sort_order: None,
+        }
+    };
+
+    // 获取路径，默认为空字符串
+    let path = request.path.as_deref().unwrap_or("");
+
+    // 调用存储管理器列出目录内容
+    let result = state
+        .storage_manager
+        .list_directory(&session_id, path, Some(&options))
+        .await
+        .map_err(|e| Error::Storage(e))?;
+
+    Ok(Json(ApiResponse::success(result)))
 }
 
 /// 获取文件内容
@@ -98,8 +132,19 @@ pub async fn get_file_content(
     Path(session_id): Path<String>,
     Json(request): Json<FileContentRequest>,
 ) -> Result<Json<ApiResponse<crate::storage::FileContent>>, Error> {
-    // TODO: 实现文件内容获取逻辑
-    Err(Error::Internal("File content reading not yet implemented".to_string()))
+    // 检查会话是否存在
+    if !state.storage_manager.session_exists(&session_id).await {
+        return Err(Error::NotFound("Session not found".to_string()));
+    }
+
+    // 获取文件内容
+    let result = state
+        .storage_manager
+        .get_file_content(&session_id, &request.path, request.start, request.length)
+        .await
+        .map_err(|e| Error::Storage(e))?;
+
+    Ok(Json(ApiResponse::success(result)))
 }
 
 /// 获取文件信息

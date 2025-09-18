@@ -71,13 +71,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/ws", get(websocket::handler))
 
         // 应用中间件
-        .layer(
-            ServiceBuilder::new()
-                .layer(TraceLayer::new_for_http())
-                .layer(cors)
-                .layer(DefaultBodyLimit::disable())
-                .layer(RequestBodyLimitLayer::new(1024 * 1024 * 100)) // 100MB 限制
-        )
+        .layer(TraceLayer::new_for_http())
+        .layer(cors)
+        .layer(DefaultBodyLimit::disable())
+        .layer(RequestBodyLimitLayer::new(1024 * 1024 * 100)) // 100MB 限制
         .with_state(state);
 
     let addr = format!("{}:{}", config.server.host, config.server.port);

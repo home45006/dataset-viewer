@@ -73,9 +73,9 @@ impl ArchiveHandler {
                         .unwrap_or_else(|| file.name().to_string()),
                     size: file.size(),
                     compressed_size: Some(file.compressed_size()),
-                    modified: file.last_modified().to_time()
-                        .map(|t| chrono::DateTime::<chrono::Utc>::from_timestamp(t.unix_timestamp(), 0))
-                        .flatten()
+                    modified: file.last_modified()
+                        .and_then(|dt| dt.to_time().ok())
+                        .and_then(|t| chrono::DateTime::<chrono::Utc>::from_timestamp(t.unix_timestamp(), 0))
                         .map(|dt| dt.to_rfc3339()),
                     is_directory: file.is_dir(),
                     is_encrypted: file.encrypted(),
@@ -140,53 +140,253 @@ impl ArchiveHandler {
         .map_err(|e| ArchiveError::IoError(e.to_string()))?
     }
 
-    /// 分析 TAR 压缩包（占位符实现）
+    /// 分析 TAR 压缩包
     async fn analyze_tar<R>(
-        _reader: R,
-        _max_entries: Option<usize>,
+        reader: R,
+        max_entries: Option<usize>,
     ) -> Result<ArchiveInfo, ArchiveError>
     where
         R: Read + Seek + Send + 'static,
     {
-        // TODO: 实现 TAR 分析
-        Err(ArchiveError::UnsupportedFormat("TAR support not implemented yet".to_string()))
+        tokio::task::spawn_blocking(move || {
+            use tar::Archive;
+
+            let mut archive = Archive::new(reader);
+            let mut entries = Vec::new();
+            let mut total_entries = 0u64;
+            let mut total_uncompressed_size = 0u64;
+            let limit = max_entries.unwrap_or(usize::MAX);
+
+            for (index, entry) in archive.entries()
+                .map_err(|e| ArchiveError::InvalidArchive(e.to_string()))?
+                .enumerate()
+            {
+                if index >= limit {
+                    break;
+                }
+
+                let entry = entry.map_err(|e| ArchiveError::InvalidArchive(e.to_string()))?;
+                let header = entry.header();
+
+                let path = entry.path()
+                    .map_err(|e| ArchiveError::InvalidArchive(e.to_string()))?
+                    .to_string_lossy()
+                    .to_string();
+
+                let name = std::path::Path::new(&path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.clone());
+
+                let size = header.size().unwrap_or(0);
+                let modified = header.mtime()
+                    .ok()
+                    .and_then(|timestamp| chrono::DateTime::<chrono::Utc>::from_timestamp(timestamp as i64, 0))
+                    .map(|dt| dt.to_rfc3339());
+
+                let entry_info = ArchiveEntry {
+                    path,
+                    name,
+                    size,
+                    compressed_size: None, // TAR不压缩，所以没有压缩大小
+                    modified,
+                    is_directory: header.entry_type().is_dir(),
+                    is_encrypted: false, // TAR不支持加密
+                    crc32: None, // TAR通常不存储CRC32
+                };
+
+                total_uncompressed_size += size;
+                entries.push(entry_info);
+                total_entries += 1;
+            }
+
+            Ok(ArchiveInfo {
+                entries,
+                total_entries,
+                total_uncompressed_size,
+                total_compressed_size: total_uncompressed_size, // TAR无压缩
+                format: ArchiveFormat::Tar,
+                has_more: total_entries > limit as u64,
+            })
+        })
+        .await
+        .map_err(|e| ArchiveError::IoError(e.to_string()))?
     }
 
-    /// 分析 TAR.GZ 压缩包（占位符实现）
+    /// 分析 TAR.GZ 压缩包
     async fn analyze_tar_gz<R>(
-        _reader: R,
-        _max_entries: Option<usize>,
+        reader: R,
+        max_entries: Option<usize>,
     ) -> Result<ArchiveInfo, ArchiveError>
     where
         R: Read + Seek + Send + 'static,
     {
-        // TODO: 实现 TAR.GZ 分析
-        Err(ArchiveError::UnsupportedFormat("TAR.GZ support not implemented yet".to_string()))
+        tokio::task::spawn_blocking(move || {
+            use tar::Archive;
+            use flate2::read::GzDecoder;
+
+            let decoder = GzDecoder::new(reader);
+            let mut archive = Archive::new(decoder);
+            let mut entries = Vec::new();
+            let mut total_entries = 0u64;
+            let mut total_uncompressed_size = 0u64;
+            let limit = max_entries.unwrap_or(usize::MAX);
+
+            for (index, entry) in archive.entries()
+                .map_err(|e| ArchiveError::InvalidArchive(e.to_string()))?
+                .enumerate()
+            {
+                if index >= limit {
+                    break;
+                }
+
+                let entry = entry.map_err(|e| ArchiveError::InvalidArchive(e.to_string()))?;
+                let header = entry.header();
+
+                let path = entry.path()
+                    .map_err(|e| ArchiveError::InvalidArchive(e.to_string()))?
+                    .to_string_lossy()
+                    .to_string();
+
+                let name = std::path::Path::new(&path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.clone());
+
+                let size = header.size().unwrap_or(0);
+                let modified = header.mtime()
+                    .ok()
+                    .and_then(|timestamp| chrono::DateTime::<chrono::Utc>::from_timestamp(timestamp as i64, 0))
+                    .map(|dt| dt.to_rfc3339());
+
+                let entry_info = ArchiveEntry {
+                    path,
+                    name,
+                    size,
+                    compressed_size: None, // 压缩大小在TAR.GZ中难以确定
+                    modified,
+                    is_directory: header.entry_type().is_dir(),
+                    is_encrypted: false,
+                    crc32: None,
+                };
+
+                total_uncompressed_size += size;
+                entries.push(entry_info);
+                total_entries += 1;
+            }
+
+            Ok(ArchiveInfo {
+                entries,
+                total_entries,
+                total_uncompressed_size,
+                total_compressed_size: 0, // 无法准确计算TAR.GZ的总压缩大小
+                format: ArchiveFormat::TarGz,
+                has_more: total_entries > limit as u64,
+            })
+        })
+        .await
+        .map_err(|e| ArchiveError::IoError(e.to_string()))?
     }
 
-    /// 从 TAR 中提取文件（占位符实现）
+    /// 从 TAR 中提取文件
     async fn extract_file_from_tar<R>(
-        _reader: R,
-        _file_path: &str,
-        _max_size: Option<u64>,
+        reader: R,
+        file_path: &str,
+        max_size: Option<u64>,
     ) -> Result<FilePreview, ArchiveError>
     where
         R: Read + Seek + Send + 'static,
     {
-        // TODO: 实现 TAR 文件提取
-        Err(ArchiveError::UnsupportedFormat("TAR support not implemented yet".to_string()))
+        let file_path = file_path.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            use tar::Archive;
+
+            let mut archive = Archive::new(reader);
+
+            for entry in archive.entries()
+                .map_err(|e| ArchiveError::InvalidArchive(e.to_string()))?
+            {
+                let mut entry = entry.map_err(|e| ArchiveError::InvalidArchive(e.to_string()))?;
+                let path = entry.path()
+                    .map_err(|e| ArchiveError::InvalidArchive(e.to_string()))?
+                    .to_string_lossy()
+                    .to_string();
+
+                if path == file_path {
+                    let total_size = entry.header().size().unwrap_or(0);
+                    let read_size = max_size.unwrap_or(total_size).min(total_size);
+
+                    let mut buffer = vec![0u8; read_size as usize];
+                    let bytes_read = entry.read(&mut buffer)
+                        .map_err(|e| ArchiveError::ExtractionFailed(e.to_string()))?;
+
+                    buffer.truncate(bytes_read);
+
+                    return Ok(FilePreview {
+                        content: buffer,
+                        is_truncated: bytes_read < total_size as usize,
+                        total_size,
+                        preview_size: bytes_read as u64,
+                    });
+                }
+            }
+
+            Err(ArchiveError::FileNotFound(file_path))
+        })
+        .await
+        .map_err(|e| ArchiveError::IoError(e.to_string()))?
     }
 
-    /// 从 TAR.GZ 中提取文件（占位符实现）
+    /// 从 TAR.GZ 中提取文件
     async fn extract_file_from_tar_gz<R>(
-        _reader: R,
-        _file_path: &str,
-        _max_size: Option<u64>,
+        reader: R,
+        file_path: &str,
+        max_size: Option<u64>,
     ) -> Result<FilePreview, ArchiveError>
     where
         R: Read + Seek + Send + 'static,
     {
-        // TODO: 实现 TAR.GZ 文件提取
-        Err(ArchiveError::UnsupportedFormat("TAR.GZ support not implemented yet".to_string()))
+        let file_path = file_path.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            use tar::Archive;
+            use flate2::read::GzDecoder;
+
+            let decoder = GzDecoder::new(reader);
+            let mut archive = Archive::new(decoder);
+
+            for entry in archive.entries()
+                .map_err(|e| ArchiveError::InvalidArchive(e.to_string()))?
+            {
+                let mut entry = entry.map_err(|e| ArchiveError::InvalidArchive(e.to_string()))?;
+                let path = entry.path()
+                    .map_err(|e| ArchiveError::InvalidArchive(e.to_string()))?
+                    .to_string_lossy()
+                    .to_string();
+
+                if path == file_path {
+                    let total_size = entry.header().size().unwrap_or(0);
+                    let read_size = max_size.unwrap_or(total_size).min(total_size);
+
+                    let mut buffer = vec![0u8; read_size as usize];
+                    let bytes_read = entry.read(&mut buffer)
+                        .map_err(|e| ArchiveError::ExtractionFailed(e.to_string()))?;
+
+                    buffer.truncate(bytes_read);
+
+                    return Ok(FilePreview {
+                        content: buffer,
+                        is_truncated: bytes_read < total_size as usize,
+                        total_size,
+                        preview_size: bytes_read as u64,
+                    });
+                }
+            }
+
+            Err(ArchiveError::FileNotFound(file_path))
+        })
+        .await
+        .map_err(|e| ArchiveError::IoError(e.to_string()))?
     }
 }
