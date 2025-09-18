@@ -1,0 +1,17 @@
+{
+  "name": "Dataset Viewer",
+  "short_name": "DatasetViewer",
+  "description": "统一的数据集浏览器，支持大文件处理和多种存储协议",
+  "theme_color": "#3b82f6",
+  "background_color": "#ffffff",
+  "display": "standalone",
+  "scope": "/",
+  "start_url": "/",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
