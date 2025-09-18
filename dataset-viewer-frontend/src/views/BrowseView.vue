@@ -1363,8 +1363,16 @@ const openArchiveFilePreview = async (archiveFileItem: any) => {
   isLoadingContent.value = true
   fileContent.value = ''
 
+  // 显示加载提示
+  console.log(`开始预览ZIP文件中的: ${archiveFileItem.path}`)
+
   try {
     const archiveFilePath = currentPath.value ? `${currentPath.value}/${archiveFile.value.basename}` : archiveFile.value.basename
+
+    // 创建超时控制器
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 30000) // 30秒超时
+
     const response = await fetch(`/api/storage/${sessionId.value}/archive/file`, {
       method: 'POST',
       headers: {
@@ -1375,7 +1383,10 @@ const openArchiveFilePreview = async (archiveFileItem: any) => {
         file_path: archiveFileItem.path,
         max_size: 10 * 1024 * 1024, // 10MB 限制
       }),
+      signal: controller.signal, // 添加超时控制
     })
+
+    clearTimeout(timeoutId) // 清除超时
 
     const data = await response.json()
     if (data.status === 'success') {
@@ -1396,12 +1407,22 @@ const openArchiveFilePreview = async (archiveFileItem: any) => {
       // 关闭Archive浏览，打开文件预览
       closeArchiveBrowse()
       isPreviewOpen.value = true
+
+      console.log(`成功预览文件: ${archiveFileItem.path}`)
     } else {
+      console.error('预览失败:', data.message)
       appStore.setGlobalError(`无法预览文件: ${data.message}`)
     }
   } catch (error) {
     console.error('Archive file preview failed:', error)
-    appStore.setGlobalError('文件预览失败')
+
+    if (error.name === 'AbortError') {
+      appStore.setGlobalError('文件预览超时（30秒），ZIP文件可能太大。请尝试预览更小的文件。')
+    } else if (error.message.includes('Failed to fetch')) {
+      appStore.setGlobalError('网络请求失败，请检查网络连接')
+    } else {
+      appStore.setGlobalError('文件预览失败')
+    }
   } finally {
     isLoadingContent.value = false
   }
