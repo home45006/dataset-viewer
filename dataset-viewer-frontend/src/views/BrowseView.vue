@@ -1484,8 +1484,37 @@ const formatDate = (dateString: string): string => {
   }
 }
 
-// 组件挂载时更新缓存信息（不自动加载，让用户手动选择）
-onMounted(() => {
+// 检查现有活跃会话
+const checkExistingSessions = async () => {
+  try {
+    const response = await fetch('/api/storage/sessions')
+    const data = await response.json()
+
+    if (data.status === 'success' && data.data.length > 0) {
+      // 有活跃会话，获取第一个会话的详细信息
+      const existingSessionId = data.data[0]
+      const sessionResponse = await fetch(`/api/storage/sessions/${existingSessionId}`)
+      const sessionData = await sessionResponse.json()
+
+      if (sessionData.status === 'success' && sessionData.data.connected) {
+        // 恢复前端状态
+        isConnected.value = true
+        sessionId.value = sessionData.data.session_id
+
+        // 尝试加载文件列表
+        await loadFiles('')
+
+        console.log('已恢复活跃的存储会话:', existingSessionId)
+      }
+    }
+  } catch (error) {
+    console.log('检查现有会话失败:', error)
+  }
+}
+
+// 组件挂载时更新缓存信息并检查现有会话
+onMounted(async () => {
   updateCacheInfo()
+  await checkExistingSessions()
 })
 </script>
