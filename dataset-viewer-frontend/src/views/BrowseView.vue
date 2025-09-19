@@ -203,28 +203,47 @@
               </div>
 
               <!-- 缓存信息 -->
-              <div v-if="hasAnyCache" class="relative mb-4">
+              <div v-if="hasDisplayedCache" class="relative mb-4">
                 <!-- 头部 -->
                 <div class="flex items-center justify-between mb-3">
                   <div class="flex items-center space-x-2">
                     <div class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                    <span class="text-sm font-medium text-emerald-700 dark:text-emerald-300">已保存的配置</span>
-                    <span class="text-xs text-gray-500 dark:text-gray-400">({{ allCacheInfo.length }})</span>
+                    <span class="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+                      {{ showAllCaches ? '所有已保存的配置' : '当前类型的配置' }}
+                    </span>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">({{ displayedCacheInfo.length }})</span>
                   </div>
-                  <button
-                    @click="clearCache"
-                    class="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all duration-200 group"
-                    title="清除所有缓存"
-                  >
-                    <svg class="w-4 h-4 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                    </svg>
-                  </button>
+                  <div class="flex items-center space-x-2">
+                    <!-- 切换显示模式 -->
+                    <button
+                      v-if="hasAnyCache && allCacheInfo.length > currentStorageTypeCacheInfo.length"
+                      @click="showAllCaches = !showAllCaches"
+                      class="p-1.5 text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all duration-200"
+                      :title="showAllCaches ? '只显示当前类型' : '显示所有类型'"
+                    >
+                      <svg v-if="showAllCaches" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/>
+                      </svg>
+                      <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/>
+                      </svg>
+                    </button>
+                    <!-- 清除按钮 -->
+                    <button
+                      @click="showAllCaches ? clearCache() : clearSpecificCache(selectedStorageType)"
+                      class="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all duration-200 group"
+                      :title="showAllCaches ? '清除所有缓存' : `清除${ConnectionCacheService.getStorageTypeName(selectedStorageType)}缓存`"
+                    >
+                      <svg class="w-4 h-4 group-hover:scale-110 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                      </svg>
+                    </button>
+                  </div>
                 </div>
 
                 <!-- 缓存卡片列表 -->
                 <div class="space-y-3">
-                  <div v-for="cache in allCacheInfo" :key="cache.storageType" class="relative group">
+                  <div v-for="cache in displayedCacheInfo" :key="cache.storageType" class="relative group">
                     <!-- 背景装饰 -->
                     <div class="absolute inset-0 bg-gradient-to-r from-emerald-50 to-blue-50 dark:from-emerald-900/10 dark:to-blue-900/10 rounded-xl"></div>
                     <div class="absolute inset-0 bg-white/50 dark:bg-gray-800/50 backdrop-blur-sm rounded-xl border border-emerald-200/50 dark:border-emerald-700/30 group-hover:border-emerald-300 dark:group-hover:border-emerald-600 transition-all duration-200"></div>
@@ -747,6 +766,21 @@ const ossConfig = reactive({
 const allCacheInfo = ref<Array<{ storageType: string; lastUsed: string; config: any }>>([])
 const hasAnyCache = computed(() => allCacheInfo.value.length > 0)
 
+// 缓存显示控制
+const showAllCaches = ref(false)
+
+// 当前存储类型的缓存信息
+const currentStorageTypeCacheInfo = computed(() => {
+  return allCacheInfo.value.filter(cache => cache.storageType === selectedStorageType.value)
+})
+const hasCurrentStorageTypeCache = computed(() => currentStorageTypeCacheInfo.value.length > 0)
+
+// 要显示的缓存信息（根据开关决定）
+const displayedCacheInfo = computed(() => {
+  return showAllCaches.value ? allCacheInfo.value : currentStorageTypeCacheInfo.value
+})
+const hasDisplayedCache = computed(() => displayedCacheInfo.value.length > 0)
+
 // OSS平台配置数据
 const ossPlatforms = {
   aliyun: {
@@ -902,11 +936,14 @@ watch(selectedStorageType, (newType) => {
     ossConfig.customEndpoint = ''
     updateConnectionEndpoint()
   }
+
+  // 切换存储类型时，自动回到当前类型显示模式
+  showAllCaches.value = false
 })
 
 // 缓存相关功能
 const loadCachedConfig = () => {
-  const cached = ConnectionCacheService.loadConnectionConfig()
+  const cached = ConnectionCacheService.loadConnectionConfig(undefined, sessionId.value || undefined)
   if (cached) {
     // 更新存储类型
     selectedStorageType.value = cached.storageType
@@ -937,7 +974,24 @@ const loadCachedConfig = () => {
 }
 
 const loadSpecificCacheConfig = (storageType: string) => {
-  const cached = ConnectionCacheService.loadConnectionConfig(storageType)
+  // 提取纯存储类型名称（移除可能的会话标识）
+  const pureStorageType = storageType.split(' ')[0] // 移除 " (user-xxx)" 部分
+
+  let cached: any = null
+
+  if (sessionId.value) {
+    // 如果已连接，从当前会话加载
+    cached = ConnectionCacheService.loadConnectionConfig(pureStorageType, sessionId.value)
+  } else {
+    // 如果未连接，从所有可用缓存中查找该存储类型的配置
+    const allAvailableInfo = ConnectionCacheService.getAllAvailableCacheInfo()
+    const targetCache = allAvailableInfo.find(cache => cache.storageType === pureStorageType)
+
+    if (targetCache) {
+      cached = targetCache.config
+    }
+  }
+
   if (cached) {
     // 更新存储类型
     selectedStorageType.value = cached.storageType
@@ -961,34 +1015,77 @@ const loadSpecificCacheConfig = (storageType: string) => {
 
     // 显示成功提示
     appStore.setGlobalError('')  // 清除可能存在的错误信息
-    console.log(`已加载${ConnectionCacheService.getStorageTypeName(storageType)}的缓存配置`)
+    console.log(`已加载${ConnectionCacheService.getStorageTypeName(pureStorageType)}的缓存配置`)
   } else {
-    console.log(`没有找到${ConnectionCacheService.getStorageTypeName(storageType)}的缓存配置`)
+    console.log(`没有找到${ConnectionCacheService.getStorageTypeName(pureStorageType)}的缓存配置`)
   }
 }
 
 const saveCacheConfig = () => {
-  if (isConnected.value) {
+  if (isConnected.value && sessionId.value) {
+    // 设置当前会话ID并保存缓存
+    ConnectionCacheService.setCurrentSession(sessionId.value)
     ConnectionCacheService.saveConnectionConfig(
       selectedStorageType.value,
       connectionConfig,
-      ossConfig
+      ossConfig,
+      sessionId.value
     )
   }
 }
 
 const clearCache = () => {
-  ConnectionCacheService.clearCache()
+  // 只清除当前用户会话的缓存
+  ConnectionCacheService.clearCache(undefined, sessionId.value || undefined)
   updateCacheInfo()
 }
 
 const clearSpecificCache = (storageType: string) => {
-  ConnectionCacheService.clearCache(storageType)
+  // 提取纯存储类型名称（移除可能的会话标识）
+  const pureStorageType = storageType.split(' ')[0] // 移除 " (user-xxx)" 部分
+
+  // 如果已连接，清除当前用户会话的特定存储类型缓存
+  // 如果未连接，清除所有会话中该存储类型的缓存
+  if (sessionId.value) {
+    ConnectionCacheService.clearCache(pureStorageType, sessionId.value)
+  } else {
+    // 清除所有会话中该存储类型的缓存
+    // 先获取所有可用缓存信息来确定需要清理的会话
+    const allAvailableInfo = ConnectionCacheService.getAllAvailableCacheInfo()
+    const targetCaches = allAvailableInfo.filter(cache => cache.storageType === pureStorageType)
+
+    // 逐个清理
+    targetCaches.forEach(cache => {
+      const sessionIdFromConfig = cache.config.sessionId
+      ConnectionCacheService.clearCache(pureStorageType, sessionIdFromConfig)
+    })
+  }
+
   updateCacheInfo()
 }
 
 const updateCacheInfo = () => {
-  allCacheInfo.value = ConnectionCacheService.getAllCacheInfo()
+  let cacheInfo: Array<{ storageType: string; lastUsed: string; config: any }> = []
+
+  if (sessionId.value) {
+    // 连接状态：显示当前用户会话的缓存信息
+    cacheInfo = ConnectionCacheService.getAllCacheInfo(sessionId.value)
+  } else {
+    // 断开连接状态：显示所有可用的缓存信息（包括所有会话的缓存）
+    cacheInfo = ConnectionCacheService.getAllAvailableCacheInfo()
+
+    // 如果没有任何缓存，尝试获取默认缓存（兼容旧版本）
+    if (cacheInfo.length === 0) {
+      cacheInfo = ConnectionCacheService.getAllCacheInfo('default')
+    }
+  }
+
+  allCacheInfo.value = cacheInfo
+  console.log('更新缓存信息:', {
+    sessionId: sessionId.value,
+    cacheCount: cacheInfo.length,
+    isConnected: !!sessionId.value
+  })
 }
 
 // 连接存储
@@ -1000,8 +1097,15 @@ const connect = async () => {
         method: 'DELETE',
       })
       isConnected.value = false
+
+      // 清理缓存服务的当前会话状态
+      ConnectionCacheService.setCurrentSession(null)
+
       sessionId.value = ''
       files.value = []
+
+      // 更新缓存信息显示（显示所有可用的缓存，包括默认和其他会话的）
+      updateCacheInfo()
     } catch (error) {
       console.error('Disconnect failed:', error)
     }
@@ -1030,6 +1134,7 @@ const connect = async () => {
       sessionId.value = data.data.session_id
       await loadFiles('')
       saveCacheConfig() // 保存连接配置到缓存
+      updateCacheInfo() // 更新缓存信息显示
     } else {
       appStore.setGlobalError(`连接失败: ${data.message}`)
     }
