@@ -632,16 +632,16 @@
     <!-- 文件预览对话框 -->
     <div
       v-if="isPreviewOpen"
-      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
-      @click="closeFilePreview"
+      :class="isPreviewFullscreen ? 'fixed inset-0 bg-white dark:bg-gray-800 z-50' : 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50'"
+      @click="isPreviewFullscreen ? null : closeFilePreview"
     >
       <div
-        class="bg-white dark:bg-gray-800 rounded-lg max-w-4xl w-full h-[80vh] flex flex-col"
+        :class="previewWindowClasses"
         @click.stop
       >
         <!-- 预览头部 -->
         <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-          <div>
+          <div class="flex-1">
             <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
               {{ previewFile?.filename }}
             </h3>
@@ -649,14 +649,74 @@
               大小: {{ formatFileSize(parseInt(previewFile?.size || '0')) }}
             </p>
           </div>
-          <button
-            @click="closeFilePreview"
-            class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
-          >
-            <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-            </svg>
-          </button>
+
+          <!-- 控制按钮组 -->
+          <div class="flex items-center space-x-2">
+            <!-- 窗口大小控制 -->
+            <div v-if="!isPreviewFullscreen" class="flex items-center space-x-1 bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
+              <button
+                @click="adjustWindowSize('small')"
+                :class="[
+                  'px-2 py-1 text-xs rounded transition-colors',
+                  previewWindowSize === 'small'
+                    ? 'bg-blue-500 text-white'
+                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                ]"
+                title="小窗口"
+              >
+                S
+              </button>
+              <button
+                @click="adjustWindowSize('medium')"
+                :class="[
+                  'px-2 py-1 text-xs rounded transition-colors',
+                  previewWindowSize === 'medium'
+                    ? 'bg-blue-500 text-white'
+                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                ]"
+                title="中等窗口"
+              >
+                M
+              </button>
+              <button
+                @click="adjustWindowSize('large')"
+                :class="[
+                  'px-2 py-1 text-xs rounded transition-colors',
+                  previewWindowSize === 'large'
+                    ? 'bg-blue-500 text-white'
+                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                ]"
+                title="大窗口"
+              >
+                L
+              </button>
+            </div>
+
+            <!-- 全屏切换按钮 -->
+            <button
+              @click="toggleFullscreen"
+              class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+              :title="isPreviewFullscreen ? '退出全屏' : '全屏预览'"
+            >
+              <svg v-if="!isPreviewFullscreen" class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
+              </svg>
+              <svg v-else class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 9V4.5M9 9H4.5M9 9L3.5 3.5M15 9h4.5M15 9V4.5M15 9l5.5-5.5M9 15v4.5M9 15H4.5M9 15l-5.5 5.5M15 15h4.5M15 15v4.5m0-4.5l5.5 5.5"/>
+              </svg>
+            </button>
+
+            <!-- 关闭按钮 -->
+            <button
+              @click="closeFilePreview"
+              class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+              title="关闭预览"
+            >
+              <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
         </div>
 
         <!-- 预览内容 -->
@@ -704,7 +764,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { ConnectionCacheService } from '@/services/storage/ConnectionCacheService'
 import { highlightCode, isCodeFile, getFileLanguage } from '@/utils/shikiHighlighter'
@@ -736,6 +796,8 @@ const files = ref<any[]>([])
 // 文件预览状态
 const isPreviewOpen = ref(false)
 const previewFile = ref<any>(null)
+const isPreviewFullscreen = ref(false)
+const previewWindowSize = ref<'small' | 'medium' | 'large'>('medium')
 
 // ZIP文件浏览状态
 const isArchiveBrowseOpen = ref(false)
@@ -1280,6 +1342,50 @@ watch([fileContent, previewFile], async () => {
   }
 }, { deep: true })
 
+// 键盘快捷键处理
+const handleKeydown = (event: KeyboardEvent) => {
+  if (!isPreviewOpen.value) return
+
+  switch (event.key) {
+    case 'Escape':
+      if (isPreviewFullscreen.value) {
+        toggleFullscreen()
+      } else {
+        closeFilePreview()
+      }
+      event.preventDefault()
+      break
+    case 'F11':
+      toggleFullscreen()
+      event.preventDefault()
+      break
+    case '1':
+      if (event.ctrlKey || event.metaKey) {
+        adjustWindowSize('small')
+        event.preventDefault()
+      }
+      break
+    case '2':
+      if (event.ctrlKey || event.metaKey) {
+        adjustWindowSize('medium')
+        event.preventDefault()
+      }
+      break
+    case '3':
+      if (event.ctrlKey || event.metaKey) {
+        adjustWindowSize('large')
+        event.preventDefault()
+      }
+      break
+  }
+}
+
+
+// 组件卸载时移除键盘事件监听
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown)
+})
+
 // 处理文件点击
 const handleFileClick = (file: any) => {
   if (file.type === 'directory') {
@@ -1451,7 +1557,34 @@ const closeFilePreview = () => {
   isPreviewOpen.value = false
   previewFile.value = null
   fileContent.value = ''
+  isPreviewFullscreen.value = false
+  previewWindowSize.value = 'medium'
 }
+
+// 切换全屏预览
+const toggleFullscreen = () => {
+  isPreviewFullscreen.value = !isPreviewFullscreen.value
+}
+
+// 调整窗口大小
+const adjustWindowSize = (size: 'small' | 'medium' | 'large') => {
+  previewWindowSize.value = size
+}
+
+// 计算预览窗口的CSS类
+const previewWindowClasses = computed(() => {
+  if (isPreviewFullscreen.value) {
+    return 'fixed inset-0 bg-white dark:bg-gray-800 rounded-none flex flex-col'
+  }
+
+  const sizeClasses = {
+    small: 'max-w-2xl w-full h-[60vh]',
+    medium: 'max-w-4xl w-full h-[80vh]',
+    large: 'max-w-6xl w-full h-[90vh]'
+  }
+
+  return `bg-white dark:bg-gray-800 rounded-lg ${sizeClasses[previewWindowSize.value]} flex flex-col`
+})
 
 // 打开压缩包浏览
 const openArchiveBrowse = async (file: any) => {
@@ -1745,6 +1878,7 @@ const checkExistingSessions = async () => {
 
 // 组件挂载时更新缓存信息并检查现有会话
 onMounted(async () => {
+  document.addEventListener('keydown', handleKeydown)
   updateCacheInfo()
   await checkExistingSessions()
 })
