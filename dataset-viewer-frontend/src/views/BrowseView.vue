@@ -725,11 +725,25 @@
             <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
           </div>
           <div v-else-if="fileContent" class="h-full">
-            <!-- 代码文件使用语法高亮预览 -->
-            <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 h-full flex flex-col">
+            <!-- JSON文件使用JsonViewer组件 -->
+            <div v-if="isJsonFile(previewFile?.filename)" class="h-full">
+              <div class="mb-2 text-xs text-gray-500 dark:text-gray-400 flex justify-between flex-shrink-0 px-4 pt-4">
+                <span>{{ previewFile?.filename }} ({{ fileContent.length }} 字符)</span>
+                <span class="text-blue-600 dark:text-blue-400">JSON 虚拟化预览</span>
+              </div>
+              <div class="h-full pb-4">
+                <JsonViewer
+                  :content="fileContent"
+                  :file-name="previewFile?.filename"
+                  :height="500"
+                />
+              </div>
+            </div>
+            <!-- 其他代码文件使用语法高亮预览 -->
+            <div v-else class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 h-full flex flex-col">
               <div class="mb-2 text-xs text-gray-500 dark:text-gray-400 flex justify-between flex-shrink-0">
                 <span>{{ previewFile?.filename }} ({{ fileContent.length }} 字符)</span>
-                <span v-if="isCodeFile(previewFile?.filename)">语法高亮: {{ getFileLanguage(previewFile?.filename) }}</span>
+                <span v-if="isCodeFile(previewFile?.filename, fileContent)">语法高亮: {{ getFileLanguage(previewFile?.filename, fileContent) }}</span>
               </div>
               <div class="flex-1 overflow-auto min-h-0 border border-gray-200 dark:border-gray-600 rounded custom-scrollbar">
                 <pre class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap font-mono leading-relaxed p-4 m-0" v-html="getHighlightedContent()"></pre>
@@ -768,6 +782,7 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { ConnectionCacheService } from '@/services/storage/ConnectionCacheService'
 import { highlightCode, isCodeFile, getFileLanguage } from '@/utils/shikiHighlighter'
+import JsonViewer from '@/components/JsonViewer.vue'
 
 const appStore = useAppStore()
 
@@ -1333,6 +1348,13 @@ const updateHighlightedContent = async (): Promise<void> => {
 // 同步版本（用于模板）
 const getHighlightedContent = (): string => {
   return highlightedContent.value || fileContent.value || ''
+}
+
+// 判断是否为JSON文件
+const isJsonFile = (filename?: string): boolean => {
+  if (!filename) return false
+  const lowerFilename = filename.toLowerCase()
+  return lowerFilename.endsWith('.json') || lowerFilename.endsWith('.jsonl') || lowerFilename.endsWith('.ndjson')
 }
 
 // 监听文件内容和预览文件变化，自动更新语法高亮
