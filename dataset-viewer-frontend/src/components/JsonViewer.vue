@@ -69,7 +69,6 @@
         class="flex-shrink-0 bg-gray-50 dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 overflow-hidden relative z-10"
         :style="{
           width: `${lineNumberWidth}px`,
-          pointerEvents: 'none',
         }"
       >
       <div
@@ -81,17 +80,29 @@
         <div
           v-for="virtualItem in virtualizer?.getVirtualItems() || []"
           :key="`line-${virtualItem.key}`"
-          class="absolute top-0 left-0 w-full text-right pr-2 text-[13px] font-mono leading-6 select-none"
+          class="absolute top-0 left-0 w-full text-right pr-2 text-[13px] font-mono leading-6 select-none flex items-center justify-end"
           :class="{
-            'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200 font-semibold': isSearchResultLine(virtualItem.index),
-            'text-gray-500 dark:text-gray-400': !isSearchResultLine(virtualItem.index)
+            'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200 font-semibold': isSearchResultLine(visibleLines[virtualItem.index]?.index),
+            'text-gray-500 dark:text-gray-400': !isSearchResultLine(visibleLines[virtualItem.index]?.index)
           }"
           :style="{
             height: `${virtualItem.size}px`,
             transform: `translateY(${virtualItem.start}px)`,
           }"
         >
-          {{ virtualItem.index + 1 }}
+          <!-- 折叠按钮 -->
+          <button
+            v-if="visibleLines[virtualItem.index] && isLineCollapsible(visibleLines[virtualItem.index].index)"
+            @click.stop="() => toggleCollapse(visibleLines[virtualItem.index].index)"
+            class="mr-1 w-4 h-4 flex items-center justify-center text-[10px] rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors cursor-pointer"
+            :class="{
+              'text-blue-600 dark:text-blue-400': true
+            }"
+            :title="isLineCollapsed(visibleLines[virtualItem.index].index) ? '展开' : '折叠'"
+          >
+            {{ isLineCollapsed(visibleLines[virtualItem.index].index) ? '+' : '-' }}
+          </button>
+          <span class="select-none">{{ (visibleLines[virtualItem.index]?.index ?? -1) + 1 }}</span>
         </div>
       </div>
     </div>
@@ -112,7 +123,7 @@
           :key="`content-${virtualItem.key}`"
           class="absolute top-0 left-0 w-full"
           :class="{
-            'bg-yellow-50 dark:bg-yellow-900/10': isSearchResultLine(virtualItem.index)
+            'bg-yellow-50 dark:bg-yellow-900/10': isSearchResultLine(visibleLines[virtualItem.index]?.index)
           }"
           :style="{
             height: `${virtualItem.size}px`,
@@ -121,7 +132,7 @@
         >
           <div
             class="text-[13px] font-mono leading-6 h-full pl-2 pr-4 whitespace-pre text-gray-900 dark:text-gray-100"
-            v-html="getHighlightedLineWithSearch(virtualItem.index)"
+            v-html="getHighlightedLineWithSearch(visibleLines[virtualItem.index]?.index)"
           />
         </div>
       </div>
@@ -156,9 +167,45 @@ const searchTerm = ref('')
 const searchResults = ref<{ lineIndex: number, startPos: number, endPos: number }[]>([])
 const currentSearchIndex = ref(-1)
 
+// JSON折叠状态
+const collapsedRanges = ref<Set<number>>(new Set())
+const jsonStructure = ref<{ level: number, isCollapsible: boolean, isArrayStart: boolean, isObjectStart: boolean }[]>([])
+
+// 是否启用折叠功能
+const enableFolding = ref(true)
+
 // 将内容按行分割
 const lines = computed(() => {
   return props.content.split('\n')
+})
+
+// 过滤出可见的行（排除被折叠的行）
+const visibleLines = computed(() => {
+  const visible: { index: number, content: string }[] = []
+
+  for (let i = 0; i < lines.value.length; i++) {
+    // 检查是否在任何折叠范围内
+    let isCollapsed = false
+    for (const collapsedLine of collapsedRanges.value) {
+      const structure = jsonStructure.value[collapsedLine]
+      if (structure?.isCollapsible && i > collapsedLine) {
+        const endLine = findMatchingBracket(collapsedLine)
+        if (i <= endLine) {
+          isCollapsed = true
+          break
+        }
+      }
+    }
+
+    if (!isCollapsed) {
+      visible.push({
+        index: i,
+        content: lines.value[i]
+      })
+    }
+  }
+
+  return visible
 })
 
 // 计算行号宽度
@@ -194,6 +241,7 @@ const initializeHighlighting = async () => {
 
 // 获取高亮的行内容
 const getHighlightedLine = (index: number): string => {
+  if (index === undefined || index < 0) return ''
   if (highlightedLines.value.length > 0) {
     return highlightedLines.value[index] || ''
   }
@@ -276,6 +324,8 @@ const isSearchResultLine = (lineIndex: number): boolean => {
 
 // 获取带搜索高亮的行内容
 const getHighlightedLineWithSearch = (index: number): string => {
+  if (index === undefined || index < 0) return ''
+
   let lineContent = getHighlightedLine(index)
 
   if (!searchTerm.value.trim() || !isSearchResultLine(index)) {
@@ -319,10 +369,146 @@ const escapeHtml = (text: string): string => {
   return div.innerHTML
 }
 
+// JSON结构分析
+const analyzeJsonStructure = () => {
+  if (!enableFolding.value) return
+
+  const structure: { level: number, isCollapsible: boolean, isArrayStart: boolean, isObjectStart: boolean }[] = []
+
+  lines.value.forEach((line, index) => {
+    const trimmedLine = line.trim()
+    let isCollapsible = false
+    let isArrayStart = false
+    let isObjectStart = false
+
+    // 检测对象开始 - 只有以 { 结尾的行才可折叠（避免单行对象）
+    if (trimmedLine.endsWith('{') && !trimmedLine.endsWith('{}')) {
+      isObjectStart = true
+      isCollapsible = true
+    }
+
+    // 检测数组开始 - 只有以 [ 结尾的行才可折叠（避免单行数组）
+    if (trimmedLine.endsWith('[') && !trimmedLine.endsWith('[]')) {
+      isArrayStart = true
+      isCollapsible = true
+    }
+
+    // 对于包含开始和结束的单行，不设置为可折叠
+    if (trimmedLine.includes('{') && trimmedLine.includes('}') && trimmedLine.trim() !== '{' && trimmedLine.trim() !== '}') {
+      isCollapsible = false
+    }
+    if (trimmedLine.includes('[') && trimmedLine.includes(']') && trimmedLine.trim() !== '[' && trimmedLine.trim() !== ']') {
+      isCollapsible = false
+    }
+
+    structure.push({
+      level: 0, // 简化实现，不跟踪嵌套级别
+      isCollapsible,
+      isArrayStart,
+      isObjectStart
+    })
+
+    if (isCollapsible) {
+      console.log(`Line ${index} is collapsible:`, line)
+    }
+  })
+
+  console.log('JSON structure analyzed:', structure.filter(s => s.isCollapsible).length, 'collapsible lines found')
+  jsonStructure.value = structure
+}
+
+// 切换折叠状态
+const toggleCollapse = (lineIndex: number) => {
+  console.log('Toggle collapse called for line:', lineIndex)
+  console.log('Current collapsed ranges:', Array.from(collapsedRanges.value))
+
+  if (collapsedRanges.value.has(lineIndex)) {
+    collapsedRanges.value.delete(lineIndex)
+    console.log('Expanded line:', lineIndex)
+  } else {
+    collapsedRanges.value.add(lineIndex)
+    console.log('Collapsed line:', lineIndex)
+  }
+
+  console.log('New collapsed ranges:', Array.from(collapsedRanges.value))
+}
+
+// 检查行是否可以折叠（有折叠按钮）
+const isLineCollapsible = (lineIndex: number): boolean => {
+  const structure = jsonStructure.value[lineIndex]
+  return structure?.isCollapsible || false
+}
+
+// 检查行是否被折叠（用于按钮显示 + 或 -）
+const isLineCollapsed = (lineIndex: number): boolean => {
+  // 如果这一行本身是折叠点，检查是否被折叠
+  return collapsedRanges.value.has(lineIndex)
+}
+
+// 检查行是否在被折叠的范围内（影响显示与否）
+const isLineInCollapsedRange = (lineIndex: number): boolean => {
+  // 检查是否在任何折叠范围内
+  for (const collapsedLine of collapsedRanges.value) {
+    const structure = jsonStructure.value[collapsedLine]
+    if (structure?.isCollapsible && lineIndex > collapsedLine) {
+      const endLine = findMatchingBracket(collapsedLine)
+      if (lineIndex <= endLine) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+// 找到匹配的括号行
+const findMatchingBracket = (startLine: number): number => {
+  const startLineText = lines.value[startLine]?.trim()
+  if (!startLineText) return startLine
+
+  let level = 0
+  let openChar = ''
+  let closeChar = ''
+
+  // 确定要匹配的括号类型
+  if (startLineText.includes('{')) {
+    openChar = '{'
+    closeChar = '}'
+  } else if (startLineText.includes('[')) {
+    openChar = '['
+    closeChar = ']'
+  } else {
+    return startLine + 3 // 如果找不到开始括号，默认折叠3行
+  }
+
+  // 从起始行开始搜索匹配的结束括号
+  for (let i = startLine; i < lines.value.length; i++) {
+    const line = lines.value[i]
+
+    for (const char of line) {
+      if (char === openChar) {
+        level++
+      } else if (char === closeChar) {
+        level--
+        if (level === 0) {
+          return i // 找到匹配的结束行
+        }
+      }
+    }
+
+    // 防止无限循环，最多搜索100行
+    if (i - startLine > 100) {
+      return startLine + 10
+    }
+  }
+
+  // 如果没找到匹配，默认折叠10行
+  return Math.min(startLine + 10, lines.value.length - 1)
+}
+
 // 虚拟滚动设置
 const virtualizer = useVirtualizer(
   computed(() => ({
-    count: lines.value.length,
+    count: visibleLines.value.length,
     getScrollElement: () => containerRef.value,
     estimateSize: () => 24, // 每行高度
     overscan: 10,
@@ -341,6 +527,7 @@ watch(() => props.content, async () => {
   updateLineNumberWidth()
   await nextTick()
   await initializeHighlighting()
+  analyzeJsonStructure()
 }, { immediate: true })
 
 // 监听搜索词变化
@@ -352,6 +539,7 @@ onMounted(async () => {
   updateLineNumberWidth()
   await nextTick()
   await initializeHighlighting()
+  analyzeJsonStructure()
 })
 </script>
 
