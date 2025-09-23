@@ -1255,7 +1255,7 @@ const updateHighlightedContent = async (): Promise<void> => {
     highlightedContent.value = fileContent.value || ''
     return
   }
-  if (!isCodeFile(previewFile.value.filename)) {
+  if (!isCodeFile(previewFile.value.filename, fileContent.value)) {
     highlightedContent.value = fileContent.value
     return
   }
