@@ -636,7 +636,7 @@
       @click="closeFilePreview"
     >
       <div
-        class="bg-white dark:bg-gray-800 rounded-lg max-w-4xl w-full max-h-[80vh] flex flex-col"
+        class="bg-white dark:bg-gray-800 rounded-lg max-w-4xl w-full h-[80vh] flex flex-col"
         @click.stop
       >
         <!-- 预览头部 -->
@@ -660,22 +660,20 @@
         </div>
 
         <!-- 预览内容 -->
-        <div class="flex-1 overflow-hidden">
+        <div class="flex-1 min-h-0 overflow-hidden">
           <div v-if="isLoadingContent" class="flex items-center justify-center h-64">
             <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
           </div>
           <div v-else-if="fileContent" class="h-full">
-            <!-- 检查是否为文本文件且内容较大，使用虚拟化查看器 -->
-            <VirtualizedTextViewer
-              v-if="shouldUseVirtualizedViewer"
-              :content="fileContent"
-              :fileName="previewFile?.filename || ''"
-              :onScrollToBottom="loadMoreContent"
-              class="h-full"
-            />
-            <!-- 小文件使用普通预览 -->
-            <div v-else class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 h-full overflow-auto">
-              <pre class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{{ fileContent }}</pre>
+            <!-- 代码文件使用语法高亮预览 -->
+            <div class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 h-full flex flex-col">
+              <div class="mb-2 text-xs text-gray-500 dark:text-gray-400 flex justify-between flex-shrink-0">
+                <span>{{ previewFile?.filename }} ({{ fileContent.length }} 字符)</span>
+                <span v-if="isCodeFile(previewFile?.filename)">语法高亮: {{ getFileLanguage(previewFile?.filename) }}</span>
+              </div>
+              <div class="flex-1 overflow-auto min-h-0 border border-gray-200 dark:border-gray-600 rounded custom-scrollbar">
+                <pre class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap font-mono leading-relaxed p-4 m-0" v-html="getHighlightedContent()"></pre>
+              </div>
             </div>
           </div>
           <div v-else class="flex items-center justify-center h-64">
@@ -913,8 +911,16 @@ const shouldUseVirtualizedViewer = computed(() => {
 
   const isTextFile = textExtensions.some(ext => fileName.toLowerCase().endsWith(ext))
 
-  // 文本文件且大于阈值时使用虚拟化查看器
-  return isTextFile && (fileSize > VIRTUAL_VIEWER_THRESHOLD || fileContent.value.length > 1000)
+  // 检查是否为可语法高亮的文件类型
+  const codeExtensions = ['.js', '.ts', '.jsx', '.tsx', '.vue', '.html', '.css', '.scss', '.sass',
+    '.py', '.java', '.cpp', '.c', '.h', '.go', '.rs', '.php', '.rb', '.sh', '.sql', '.json',
+    '.xml', '.yml', '.yaml', '.md']
+
+  const isCodeFile = codeExtensions.some(ext => fileName.toLowerCase().endsWith(ext))
+
+  // 对于代码文件，总是使用虚拟化查看器以启用语法高亮
+  // 对于其他文本文件，只有大于阈值时才使用虚拟化查看器
+  return isTextFile && (isCodeFile || fileSize > VIRTUAL_VIEWER_THRESHOLD || fileContent.value.length > 1000)
 })
 
 // 重置配置
@@ -1090,6 +1096,13 @@ const updateCacheInfo = () => {
 
 // 连接存储
 const connect = async () => {
+  console.log('🔌 Connect clicked, current state:', {
+    isConnected: isConnected.value,
+    sessionId: sessionId.value,
+    selectedStorageType: selectedStorageType.value,
+    connectionConfig: connectionConfig
+  })
+
   if (isConnected.value) {
     // 断开连接
     try {
@@ -1146,36 +1159,55 @@ const connect = async () => {
   }
 }
 
-// 加载文件列表
+// 加载文件列表（支持自动分页）
 const loadFiles = async (path: string) => {
   if (!isConnected.value) return
 
   isLoading.value = true
   try {
-    const response = await fetch(`/api/storage/${sessionId.value}/list`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        session_id: sessionId.value,
-        path: path || undefined,
-        options: {
-          page_size: 100,
-          sort_by: 'name',
-          sort_order: 'asc',
-        },
-      }),
-    })
+    let allFiles: any[] = []
+    let hasMore = true
+    let marker: string | undefined = undefined
 
-    const data = await response.json()
-    
-    if (data.status === 'success') {
-      files.value = data.data.files
-      currentPath.value = path
-    } else {
-      appStore.setGlobalError(`加载文件失败: ${data.message}`)
+    // 循环加载所有页面
+    while (hasMore) {
+      const response = await fetch(`/api/storage/${sessionId.value}/list`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          session_id: sessionId.value,
+          path: path || undefined,
+          options: {
+            page_size: 1000,
+            sort_by: 'name',
+            sort_order: 'asc',
+            marker: marker,
+          },
+        }),
+      })
+
+      const data = await response.json()
+
+      if (data.status === 'success') {
+        allFiles = allFiles.concat(data.data.files)
+        hasMore = data.data.has_more || false
+        marker = data.data.next_marker
+      } else {
+        appStore.setGlobalError(`加载文件失败: ${data.message}`)
+        break
+      }
+
+      // 安全检查，避免无限循环
+      if (allFiles.length > 10000) {
+        console.warn('文件数量超过10000个，停止加载')
+        break
+      }
     }
+
+    files.value = allFiles
+    currentPath.value = path
   } catch (error) {
     console.error('Load files failed:', error)
     appStore.setGlobalError('加载文件失败')
@@ -1209,6 +1241,74 @@ const isArchiveFile = (filename: string): boolean => {
   const archiveExtensions = ['.zip', '.tar', '.gz', '.bz2']
   const lowerFilename = filename.toLowerCase()
   return archiveExtensions.some(ext => lowerFilename.endsWith(ext))
+}
+
+// 判断是否为代码文件
+const isCodeFile = (filename?: string): boolean => {
+  if (!filename) return false
+  const codeExtensions = ['.js', '.ts', '.jsx', '.tsx', '.vue', '.html', '.css', '.scss', '.sass',
+    '.py', '.java', '.cpp', '.c', '.h', '.go', '.rs', '.php', '.rb', '.sh', '.sql', '.json',
+    '.xml', '.yml', '.yaml', '.md', '.txt', '.log']
+  const lowerFilename = filename.toLowerCase()
+  return codeExtensions.some(ext => lowerFilename.endsWith(ext))
+}
+
+// 获取文件语言类型
+const getFileLanguage = (filename?: string): string => {
+  if (!filename) return 'text'
+  const ext = filename.split('.').pop()?.toLowerCase() || ''
+  const languageMap: Record<string, string> = {
+    js: 'javascript', ts: 'typescript', jsx: 'javascript', tsx: 'typescript',
+    vue: 'vue', html: 'html', css: 'css', scss: 'scss', py: 'python',
+    java: 'java', cpp: 'cpp', c: 'c', go: 'go', rs: 'rust',
+    php: 'php', rb: 'ruby', sh: 'bash', sql: 'sql', json: 'json',
+    xml: 'xml', yml: 'yaml', yaml: 'yaml', md: 'markdown'
+  }
+  return languageMap[ext] || 'text'
+}
+
+// 获取语法高亮的内容
+const getHighlightedContent = (): string => {
+  if (!fileContent.value || !previewFile.value?.filename) {
+    return fileContent.value || ''
+  }
+
+  if (!isCodeFile(previewFile.value.filename)) {
+    return fileContent.value
+  }
+
+  // 简单的语法高亮实现
+  const language = getFileLanguage(previewFile.value.filename)
+  return applySimpleSyntaxHighlight(fileContent.value, language)
+}
+
+// 简单语法高亮实现
+const applySimpleSyntaxHighlight = (code: string, language: string): string => {
+  if (language === 'json') {
+    return code
+      .replace(/(".*?")\s*:/g, '<span style="color: #0969da; font-weight: bold;">$1</span>:')
+      .replace(/:\s*(".*?")/g, ': <span style="color: #0a3069;">$1</span>')
+      .replace(/:\s*(true|false|null)/g, ': <span style="color: #8250df;">$1</span>')
+      .replace(/:\s*(\d+\.?\d*)/g, ': <span style="color: #0969da;">$1</span>')
+  }
+
+  if (language === 'javascript' || language === 'typescript') {
+    return code
+      .replace(/\b(function|const|let|var|if|else|for|while|return|import|export|class|extends)\b/g, '<span style="color: #cf222e; font-weight: bold;">$1</span>')
+      .replace(/('[^']*'|"[^"]*")/g, '<span style="color: #0a3069;">$1</span>')
+      .replace(/\b(\d+\.?\d*)\b/g, '<span style="color: #0969da;">$1</span>')
+      .replace(/(\/\/.*$)/gm, '<span style="color: #656d76; font-style: italic;">$1</span>')
+  }
+
+  if (language === 'python') {
+    return code
+      .replace(/\b(def|class|if|else|elif|for|while|return|import|from|try|except|with|as)\b/g, '<span style="color: #cf222e; font-weight: bold;">$1</span>')
+      .replace(/('[^']*'|"[^"]*")/g, '<span style="color: #0a3069;">$1</span>')
+      .replace(/\b(\d+\.?\d*)\b/g, '<span style="color: #0969da;">$1</span>')
+      .replace(/(#.*$)/gm, '<span style="color: #656d76; font-style: italic;">$1</span>')
+  }
+
+  return code
 }
 
 // 处理文件点击
@@ -1255,6 +1355,7 @@ const downloadFile = async (file: any) => {
 
 // 文件预览（支持大文件分块加载）
 const openFilePreview = async (file: any) => {
+  console.log('🔍 openFilePreview called with file:', file)
   previewFile.value = file
   isPreviewOpen.value = true
   isLoadingContent.value = true
@@ -1262,6 +1363,13 @@ const openFilePreview = async (file: any) => {
   fileLoadOffset.value = 0
   fileLoadedSize.value = 0
   fileTotalSize.value = parseInt(file.size || '0')
+
+  console.log('🔍 File preview state:', {
+    filename: file.filename,
+    size: file.size,
+    sessionId: sessionId.value,
+    shouldUseVirtualized: shouldUseVirtualizedViewer.value
+  })
 
   try {
     await loadFileChunk(file, 0, CHUNK_SIZE)
@@ -1275,6 +1383,16 @@ const openFilePreview = async (file: any) => {
 // 加载文件块
 const loadFileChunk = async (file: any, offset: number, size: number) => {
   const filePath = currentPath.value ? `${currentPath.value}/${file.basename}` : file.basename
+
+  console.log('📄 loadFileChunk called:', {
+    filename: file.filename,
+    basename: file.basename,
+    filePath,
+    offset,
+    size,
+    sessionId: sessionId.value,
+    currentPath: currentPath.value
+  })
 
   try {
     const response = await fetch(`/api/storage/${sessionId.value}/file/content`, {
@@ -1291,12 +1409,20 @@ const loadFileChunk = async (file: any, offset: number, size: number) => {
     })
 
     const data = await response.json()
+    console.log('📡 Response:', { status: data.status, dataKeys: Object.keys(data.data || {}) })
+
     if (data.status === 'success') {
       // 将字节数组转换为文本
       const content = data.data.content
       const decoder = new TextDecoder('utf-8')
       const uint8Array = new Uint8Array(content)
       const chunkText = decoder.decode(uint8Array)
+
+      console.log('📄 Content decoded:', {
+        contentLength: content.length,
+        textLength: chunkText.length,
+        preview: chunkText.substring(0, 100) + (chunkText.length > 100 ? '...' : '')
+      })
 
       // 第一次加载或者追加内容
       if (offset === 0) {
@@ -1308,11 +1434,21 @@ const loadFileChunk = async (file: any, offset: number, size: number) => {
       fileLoadOffset.value = offset + chunkText.length
       fileLoadedSize.value += chunkText.length
 
+      console.log('📄 Final state (before setting loading false):', {
+        fileContentLength: fileContent.value.length,
+        isLoadingContent: isLoadingContent.value,
+        totalLoaded: fileLoadedSize.value,
+        offset: offset
+      })
+
       // 如果是初始加载，显示内容
       if (offset === 0) {
+        console.log('📄 Setting isLoadingContent to false because offset === 0')
         isLoadingContent.value = false
+        console.log('📄 After setting: isLoadingContent =', isLoadingContent.value)
       }
     } else {
+      console.error('📄 API returned error:', data)
       appStore.setGlobalError(`文件预览失败: ${data.message}`)
       if (offset === 0) {
         isLoadingContent.value = false
@@ -1644,3 +1780,42 @@ onMounted(async () => {
   await checkExistingSessions()
 })
 </script>
+
+<style scoped>
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.5);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(156, 163, 175, 0.7);
+}
+
+.dark .custom-scrollbar {
+  scrollbar-color: rgba(75, 85, 99, 0.5) transparent;
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(75, 85, 99, 0.5);
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(75, 85, 99, 0.7);
+}
+</style>
