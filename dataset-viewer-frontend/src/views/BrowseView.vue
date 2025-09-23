@@ -707,7 +707,7 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { ConnectionCacheService } from '@/services/storage/ConnectionCacheService'
-import VirtualizedTextViewer from '@/components/VirtualizedTextViewer.vue'
+import { highlightCode, isCodeFile, getFileLanguage } from '@/utils/shikiHighlighter'
 
 const appStore = useAppStore()
 
@@ -1244,72 +1244,41 @@ const isArchiveFile = (filename: string): boolean => {
 }
 
 // 判断是否为代码文件
-const isCodeFile = (filename?: string): boolean => {
-  if (!filename) return false
-  const codeExtensions = ['.js', '.ts', '.jsx', '.tsx', '.vue', '.html', '.css', '.scss', '.sass',
-    '.py', '.java', '.cpp', '.c', '.h', '.go', '.rs', '.php', '.rb', '.sh', '.sql', '.json',
-    '.xml', '.yml', '.yaml', '.md', '.txt', '.log']
-  const lowerFilename = filename.toLowerCase()
-  return codeExtensions.some(ext => lowerFilename.endsWith(ext))
-}
 
-// 获取文件语言类型
-const getFileLanguage = (filename?: string): string => {
-  if (!filename) return 'text'
-  const ext = filename.split('.').pop()?.toLowerCase() || ''
-  const languageMap: Record<string, string> = {
-    js: 'javascript', ts: 'typescript', jsx: 'javascript', tsx: 'typescript',
-    vue: 'vue', html: 'html', css: 'css', scss: 'scss', py: 'python',
-    java: 'java', cpp: 'cpp', c: 'c', go: 'go', rs: 'rust',
-    php: 'php', rb: 'ruby', sh: 'bash', sql: 'sql', json: 'json',
-    xml: 'xml', yml: 'yaml', yaml: 'yaml', md: 'markdown'
-  }
-  return languageMap[ext] || 'text'
-}
 
-// 获取语法高亮的内容
-const getHighlightedContent = (): string => {
+// 响应式语法高亮内容
+const highlightedContent = ref('')
+
+// 异步获取语法高亮的内容
+const updateHighlightedContent = async (): Promise<void> => {
   if (!fileContent.value || !previewFile.value?.filename) {
-    return fileContent.value || ''
+    highlightedContent.value = fileContent.value || ''
+    return
   }
-
   if (!isCodeFile(previewFile.value.filename)) {
-    return fileContent.value
+    highlightedContent.value = fileContent.value
+    return
   }
 
-  // 简单的语法高亮实现
-  const language = getFileLanguage(previewFile.value.filename)
-  return applySimpleSyntaxHighlight(fileContent.value, language)
+  try {
+    highlightedContent.value = await highlightCode(fileContent.value, previewFile.value.filename)
+  } catch (error) {
+    console.error('语法高亮失败:', error)
+    highlightedContent.value = fileContent.value
+  }
 }
 
-// 简单语法高亮实现
-const applySimpleSyntaxHighlight = (code: string, language: string): string => {
-  if (language === 'json') {
-    return code
-      .replace(/(".*?")\s*:/g, '<span style="color: #0969da; font-weight: bold;">$1</span>:')
-      .replace(/:\s*(".*?")/g, ': <span style="color: #0a3069;">$1</span>')
-      .replace(/:\s*(true|false|null)/g, ': <span style="color: #8250df;">$1</span>')
-      .replace(/:\s*(\d+\.?\d*)/g, ': <span style="color: #0969da;">$1</span>')
-  }
-
-  if (language === 'javascript' || language === 'typescript') {
-    return code
-      .replace(/\b(function|const|let|var|if|else|for|while|return|import|export|class|extends)\b/g, '<span style="color: #cf222e; font-weight: bold;">$1</span>')
-      .replace(/('[^']*'|"[^"]*")/g, '<span style="color: #0a3069;">$1</span>')
-      .replace(/\b(\d+\.?\d*)\b/g, '<span style="color: #0969da;">$1</span>')
-      .replace(/(\/\/.*$)/gm, '<span style="color: #656d76; font-style: italic;">$1</span>')
-  }
-
-  if (language === 'python') {
-    return code
-      .replace(/\b(def|class|if|else|elif|for|while|return|import|from|try|except|with|as)\b/g, '<span style="color: #cf222e; font-weight: bold;">$1</span>')
-      .replace(/('[^']*'|"[^"]*")/g, '<span style="color: #0a3069;">$1</span>')
-      .replace(/\b(\d+\.?\d*)\b/g, '<span style="color: #0969da;">$1</span>')
-      .replace(/(#.*$)/gm, '<span style="color: #656d76; font-style: italic;">$1</span>')
-  }
-
-  return code
+// 同步版本（用于模板）
+const getHighlightedContent = (): string => {
+  return highlightedContent.value || fileContent.value || ''
 }
+
+// 监听文件内容和预览文件变化，自动更新语法高亮
+watch([fileContent, previewFile], async () => {
+  if (fileContent.value && previewFile.value) {
+    await updateHighlightedContent()
+  }
+}, { deep: true })
 
 // 处理文件点击
 const handleFileClick = (file: any) => {
