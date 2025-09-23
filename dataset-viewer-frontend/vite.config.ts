@@ -13,6 +13,10 @@ export default defineConfig({
   server: {
     port: 3002,
     host: true,
+    headers: {
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+      'Cross-Origin-Opener-Policy': 'same-origin',
+    },
     proxy: {
       // 代理 API 请求到后端
       '/api': {
@@ -43,6 +47,7 @@ export default defineConfig({
   optimizeDeps: {
     include: ['vue', 'vue-router', 'pinia', '@vueuse/core'],
   },
+  assetsInclude: ['**/*.wasm'],
   define: {
     __VUE_I18N_FULL_INSTALL__: true,
     __VUE_I18N_LEGACY_API__: false,

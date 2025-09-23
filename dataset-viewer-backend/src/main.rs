@@ -38,7 +38,7 @@ async fn main() -> anyhow::Result<()> {
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
         .allow_headers([CONTENT_TYPE])
         .allow_credentials(true)
-        .allow_origin("http://localhost:3000".parse::<HeaderValue>().unwrap()); // Vue 开发服务器地址
+        .allow_origin("http://localhost:3002".parse::<HeaderValue>().unwrap()); // Vue 开发服务器地址
 
     // 构建路由
     let app = Router::new()
