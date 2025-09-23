@@ -276,7 +276,7 @@ export function isCodeFile(filename: string | undefined, content?: string): bool
   return language !== 'text'
 }
 
-export async function highlightCode(code: string, filename: string | undefined): Promise<string> {
+export async function highlightCode(code: string, filename: string | undefined, isDarkMode?: boolean): Promise<string> {
   if (!highlighterInstance) {
     await initializeHighlighter()
   }
@@ -290,14 +290,23 @@ export async function highlightCode(code: string, filename: string | undefined):
     // 传递文件内容以便更好地检测语言类型
     const language = getFileLanguage(filename, code)
 
+    // 特殊处理日志文件
+    if (language === 'log') {
+      return highlightLogFile(code, isDarkMode)
+    }
+
     // Check if the language is supported
     const loadedLanguages = highlighterInstance.getLoadedLanguages()
     const effectiveLanguage = loadedLanguages.includes(language as any) ? language : 'text'
 
-    // Use dark theme for now (you can make this configurable)
+    // 根据深色模式选择主题
+    const theme = isDarkMode !== undefined
+      ? (isDarkMode ? 'github-dark' : 'github-light')
+      : 'github-dark'
+
     const highlighted = highlighterInstance.codeToHtml(code, {
       lang: effectiveLanguage,
-      theme: 'github-dark'
+      theme
     })
 
     return highlighted
@@ -306,6 +315,120 @@ export async function highlightCode(code: string, filename: string | undefined):
     // Fallback to plain text
     return `<pre class="shiki">${escapeHtml(code)}</pre>`
   }
+}
+
+// 专门的日志文件高亮函数
+function highlightLogFile(code: string, isDarkMode?: boolean): string {
+  const lines = code.split('\n')
+  const highlightedLines = lines.map(line => highlightLogLine(line, isDarkMode))
+
+  const themeClass = isDarkMode ? 'github-dark' : 'github-light'
+  return `<pre class="shiki" data-theme="${themeClass}"><code>${highlightedLines.join('\n')}</code></pre>`
+}
+
+// 高亮单行日志
+function highlightLogLine(line: string, isDarkMode?: boolean): string {
+  if (!line.trim()) return line
+
+  let result = escapeHtml(line)
+
+  // 定义颜色方案
+  const colors = isDarkMode ? {
+    timestamp: '#8b949e',      // 时间戳 - 灰色
+    error: '#f85149',          // 错误 - 红色
+    warn: '#f0883e',           // 警告 - 橙色
+    info: '#79c0ff',           // 信息 - 蓝色
+    debug: '#a5a5a5',          // 调试 - 灰色
+    string: '#a5d6ff',         // 字符串 - 浅蓝色
+    number: '#79c0ff',         // 数字 - 蓝色
+    ip: '#d2a8ff',             // IP地址 - 紫色
+    url: '#a5d6ff',            // URL - 浅蓝色
+    keyword: '#ff7b72'         // 关键词 - 红色
+  } : {
+    timestamp: '#6e7781',      // 时间戳 - 灰色
+    error: '#cf222e',          // 错误 - 红色
+    warn: '#bc4c00',           // 警告 - 橙色
+    info: '#0969da',           // 信息 - 蓝色
+    debug: '#656d76',          // 调试 - 灰色
+    string: '#0a3069',         // 字符串 - 深蓝色
+    number: '#0550ae',         // 数字 - 蓝色
+    ip: '#8250df',             // IP地址 - 紫色
+    url: '#0a3069',            // URL - 深蓝色
+    keyword: '#cf222e'         // 关键词 - 红色
+  }
+
+  // 高亮时间戳
+  result = result.replace(
+    /(\d{4}[-/]\d{2}[-/]\d{2}[\sT]\d{2}:\d{2}:\d{2}(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})?)/g,
+    `<span style="color: ${colors.timestamp}">$1</span>`
+  )
+
+  // 高亮日志级别
+  result = result.replace(
+    /\b(ERROR|FATAL|EXCEPTION)\b/gi,
+    `<span style="color: ${colors.error}; font-weight: bold">$1</span>`
+  )
+  result = result.replace(
+    /\b(WARN|WARNING)\b/gi,
+    `<span style="color: ${colors.warn}; font-weight: bold">$1</span>`
+  )
+  result = result.replace(
+    /\b(INFO)\b/gi,
+    `<span style="color: ${colors.info}; font-weight: bold">$1</span>`
+  )
+  result = result.replace(
+    /\b(DEBUG|TRACE)\b/gi,
+    `<span style="color: ${colors.debug}">$1</span>`
+  )
+
+  // 高亮IP地址
+  result = result.replace(
+    /\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/g,
+    `<span style="color: ${colors.ip}">$1</span>`
+  )
+
+  // 高亮URL
+  result = result.replace(
+    /(https?:\/\/[^\s]+)/g,
+    `<span style="color: ${colors.url}">$1</span>`
+  )
+
+  // 高亮引用的字符串
+  result = result.replace(
+    /"([^"\\]*(\\.[^"\\]*)*)"/g,
+    `<span style="color: ${colors.string}">"$1"</span>`
+  )
+
+  // 高亮数字
+  result = result.replace(
+    /\b(\d+(?:\.\d+)?)\b/g,
+    `<span style="color: ${colors.number}">$1</span>`
+  )
+
+  // 高亮HTTP状态码
+  result = result.replace(
+    /\b([1-5]\d{2})\b/g,
+    (match, code) => {
+      const statusCode = parseInt(code)
+      let color = colors.info
+      if (statusCode >= 400 && statusCode < 500) color = colors.warn
+      if (statusCode >= 500) color = colors.error
+      return `<span style="color: ${color}; font-weight: bold">${code}</span>`
+    }
+  )
+
+  // 高亮常见关键词
+  result = result.replace(
+    /\b(failed|failure|exception|crash|panic|abort|kill|timeout|denied|forbidden|unauthorized)\b/gi,
+    `<span style="color: ${colors.error}">$1</span>`
+  )
+
+  result = result.replace(
+    /\b(success|successful|complete|completed|ok|ready|started|finished)\b/gi,
+    `<span style="color: ${colors.info}">$1</span>`
+  )
+
+  return result
 }
 
 function escapeHtml(text: string): string {

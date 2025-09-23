@@ -739,6 +739,20 @@
                 />
               </div>
             </div>
+            <!-- LOG文件使用LogViewer组件 -->
+            <div v-else-if="isLogFile(previewFile?.filename, fileContent)" class="h-full">
+              <div class="mb-2 text-xs text-gray-500 dark:text-gray-400 flex justify-between flex-shrink-0 px-4 pt-4">
+                <span>{{ previewFile?.filename }} ({{ fileContent.length }} 字符)</span>
+                <span class="text-green-600 dark:text-green-400">日志虚拟化预览</span>
+              </div>
+              <div class="h-full pb-4">
+                <LogViewer
+                  :content="fileContent"
+                  :file-name="previewFile?.filename"
+                  :height="500"
+                />
+              </div>
+            </div>
             <!-- 其他代码文件使用语法高亮预览 -->
             <div v-else class="bg-gray-50 dark:bg-gray-900 rounded-lg p-4 h-full flex flex-col">
               <div class="mb-2 text-xs text-gray-500 dark:text-gray-400 flex justify-between flex-shrink-0">
@@ -783,6 +797,7 @@ import { useAppStore } from '@/stores/app'
 import { ConnectionCacheService } from '@/services/storage/ConnectionCacheService'
 import { highlightCode, isCodeFile, getFileLanguage } from '@/utils/shikiHighlighter'
 import JsonViewer from '@/components/JsonViewer.vue'
+import LogViewer from '@/components/LogViewer.vue'
 
 const appStore = useAppStore()
 
@@ -1355,6 +1370,46 @@ const isJsonFile = (filename?: string): boolean => {
   if (!filename) return false
   const lowerFilename = filename.toLowerCase()
   return lowerFilename.endsWith('.json') || lowerFilename.endsWith('.jsonl') || lowerFilename.endsWith('.ndjson')
+}
+
+const isLogFile = (filename?: string, content?: string): boolean => {
+  if (!filename) return false
+  const lowerFilename = filename.toLowerCase()
+
+  // 检查文件扩展名
+  const logExtensions = ['.log', '.logs', '.out', '.err', '.trace', '.debug', '.access', '.error']
+  const hasLogExtension = logExtensions.some(ext => lowerFilename.endsWith(ext))
+
+  // 检查文件名模式
+  const logNamePatterns = [
+    /\.log$/i,
+    /^access[\.\-_]/i,
+    /^error[\.\-_]/i,
+    /^debug[\.\-_]/i,
+    /^application[\.\-_]/i,
+    /^system[\.\-_]/i,
+    /^messages$/i,
+    /^syslog$/i,
+    /^kern\.log$/i,
+    /^auth\.log$/i,
+    /^mail\.log$/i,
+    /^cron\.log$/i,
+    /console\.log$/i
+  ]
+  const hasLogNamePattern = logNamePatterns.some(pattern => pattern.test(lowerFilename))
+
+  // 如果有日志扩展名或名称模式，直接认为是日志文件
+  if (hasLogExtension || hasLogNamePattern) {
+    return true
+  }
+
+  // 如果提供了内容，检查内容特征
+  if (content) {
+    const detectedLanguage = getFileLanguage(filename, content)
+    return detectedLanguage === 'log'
+  }
+
+  return false
 }
 
 // 监听文件内容和预览文件变化，自动更新语法高亮
