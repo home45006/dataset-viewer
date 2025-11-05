@@ -1624,10 +1624,16 @@ const loadMoreContent = async () => {
   console.log('Loading more content...', {
     loaded: fileLoadedSize.value,
     total: fileTotalSize.value,
-    offset: fileLoadOffset.value
+    offset: fileLoadOffset.value,
+    isArchiveFile: previewFile.value.isArchiveFile
   })
 
-  await loadFileChunk(previewFile.value, fileLoadOffset.value, CHUNK_SIZE)
+  // 判断是否为压缩包内文件
+  if (previewFile.value.isArchiveFile) {
+    await loadMoreArchiveContent()
+  } else {
+    await loadFileChunk(previewFile.value, fileLoadOffset.value, CHUNK_SIZE)
+  }
 }
 
 const closeFilePreview = () => {
@@ -1782,63 +1788,40 @@ const navigateToArchiveParent = () => {
 const openArchiveFilePreview = async (archiveFileItem: any) => {
   isLoadingContent.value = true
   fileContent.value = ''
+  fileLoadOffset.value = 0
+  fileLoadedSize.value = 0
+  fileTotalSize.value = parseInt(archiveFileItem.size || '0')
 
   // 显示加载提示
-  console.log(`开始预览ZIP文件中的: ${archiveFileItem.path}`)
+  console.log(`开始预览ZIP文件中的: ${archiveFileItem.path}，总大小: ${fileTotalSize.value} 字节`)
 
   try {
     const archiveFilePath = currentPath.value ? `${currentPath.value}/${archiveFile.value.basename}` : archiveFile.value.basename
 
-    // 创建超时控制器
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 30000) // 30秒超时
-
-    const response = await fetch(`/api/storage/${sessionId.value}/archive/file`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        archive_path: archiveFilePath,
-        file_path: archiveFileItem.path,
-        max_size: 10 * 1024 * 1024, // 10MB 限制
-      }),
-      signal: controller.signal, // 添加超时控制
-    })
-
-    clearTimeout(timeoutId) // 清除超时
-
-    const data = await response.json()
-    if (data.status === 'success') {
-      // 设置预览文件信息
-      previewFile.value = {
-        filename: archiveFileItem.name,
-        size: archiveFileItem.size.toString(),
-        path: archiveFileItem.path,
-        isArchiveFile: true
-      }
-
-      // 将字节数组转换为文本
-      const content = data.data.content
-      const decoder = new TextDecoder('utf-8')
-      const uint8Array = new Uint8Array(content)
-      fileContent.value = decoder.decode(uint8Array)
-
-      // 关闭Archive浏览，打开文件预览
-      closeArchiveBrowse()
-      isPreviewOpen.value = true
-
-      console.log(`成功预览文件: ${archiveFileItem.path}`)
-    } else {
-      console.error('预览失败:', data.message)
-      appStore.setGlobalError(`无法预览文件: ${data.message}`)
+    // 设置预览文件信息
+    previewFile.value = {
+      filename: archiveFileItem.name,
+      size: archiveFileItem.size.toString(),
+      path: archiveFileItem.path,
+      isArchiveFile: true,
+      archivePath: archiveFilePath  // 保存压缩包路径用于后续分块加载
     }
+
+    // 首先加载第一块（1MB），快速显示
+    const FIRST_CHUNK_SIZE = 1024 * 1024 // 1MB
+    await loadArchiveFileChunk(archiveFilePath, archiveFileItem.path, 0, FIRST_CHUNK_SIZE)
+
+    // 关闭Archive浏览，打开文件预览
+    closeArchiveBrowse()
+    isPreviewOpen.value = true
+
+    console.log(`成功预览文件首块: ${archiveFileItem.path}`)
   } catch (error) {
     console.error('Archive file preview failed:', error)
 
     if (error.name === 'AbortError') {
-      appStore.setGlobalError('文件预览超时（30秒），ZIP文件可能太大。请尝试预览更小的文件。')
-    } else if (error.message.includes('Failed to fetch')) {
+      appStore.setGlobalError('文件预览超时，请尝试预览更小的文件')
+    } else if (error.message && error.message.includes('Failed to fetch')) {
       appStore.setGlobalError('网络请求失败，请检查网络连接')
     } else {
       appStore.setGlobalError('文件预览失败')
@@ -1846,6 +1829,82 @@ const openArchiveFilePreview = async (archiveFileItem: any) => {
   } finally {
     isLoadingContent.value = false
   }
+}
+
+// 加载压缩包内文件的分块内容
+const loadArchiveFileChunk = async (archivePath: string, filePath: string, offset: number, length: number) => {
+  console.log(`加载压缩包文件块: offset=${offset}, length=${length}`)
+
+  // 创建超时控制器（30秒超时）
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 30000)
+
+  try {
+    const response = await fetch(`/api/storage/${sessionId.value}/archive/file`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        archive_path: archivePath,
+        file_path: filePath,
+        content_offset: offset,
+        content_length: length,
+      }),
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    const data = await response.json()
+    if (data.status === 'success') {
+      // 将字节数组转换为文本
+      const content = data.data.content
+      const decoder = new TextDecoder('utf-8')
+      const uint8Array = new Uint8Array(content)
+      const chunkText = decoder.decode(uint8Array)
+
+      // 追加或设置内容
+      if (offset === 0) {
+        fileContent.value = chunkText
+        fileLoadedSize.value = chunkText.length
+      } else {
+        fileContent.value += chunkText
+        fileLoadedSize.value += chunkText.length
+      }
+
+      fileLoadOffset.value = offset + chunkText.length
+
+      console.log(`成功加载文件块，已加载: ${fileLoadedSize.value} / ${fileTotalSize.value} 字节`)
+    } else {
+      console.error('加载文件块失败:', data.message)
+      appStore.setGlobalError(`加载文件块失败: ${data.message}`)
+    }
+  } catch (error) {
+    clearTimeout(timeoutId)
+    throw error
+  }
+}
+
+// 加载压缩包文件的更多内容
+const loadMoreArchiveContent = async () => {
+  if (!previewFile.value || !previewFile.value.isArchiveFile || !previewFile.value.archivePath) {
+    return
+  }
+
+  if (fileLoadedSize.value >= fileTotalSize.value) {
+    console.log('压缩包文件已全部加载')
+    return
+  }
+
+  console.log('加载更多压缩包文件内容...')
+  const CHUNK_SIZE = 1024 * 1024 // 1MB
+  await loadArchiveFileChunk(
+    previewFile.value.archivePath,
+    previewFile.value.path,
+    fileLoadOffset.value,
+    CHUNK_SIZE
+  )
 }
 
 // OSS平台和地域处理方法

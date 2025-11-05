@@ -25,6 +25,10 @@ pub struct GetArchiveFileRequest {
     pub file_path: String,
     pub max_size: Option<u64>,
     pub offset: Option<u64>,
+    /// 解压后内容的起始偏移（用于分块预览）
+    pub content_offset: Option<u64>,
+    /// 解压后内容的读取长度（用于分块预览）
+    pub content_length: Option<u64>,
 }
 
 /// 获取压缩包信息
@@ -306,11 +310,11 @@ pub async fn get_archive_file(
             file_entry.filename, file_entry.local_header_offset,
             file_entry.compressed_size, file_entry.uncompressed_size);
 
-        // 限制要提取的文件大小
+        // 限制要提取的文件大小（对于分块预览，不检查完整大小）
         const MAX_FILE_SIZE: u64 = 100 * 1024 * 1024; // 100MB
-        if file_entry.uncompressed_size > MAX_FILE_SIZE {
+        if request.content_offset.is_none() && file_entry.uncompressed_size > MAX_FILE_SIZE {
             return Err(Error::BadRequest(format!(
-                "目标文件太大 ({:.2} MB)，超过100MB限制",
+                "目标文件太大 ({:.2} MB)，超过100MB限制。请使用分块预览。",
                 file_entry.uncompressed_size as f64 / 1024.0 / 1024.0
             )));
         }
@@ -321,7 +325,8 @@ pub async fn get_archive_file(
             &session_id,
             &request.archive_path,
             &file_entry,
-            request.max_size
+            request.content_offset,
+            request.content_length
         ).await?;
 
         // 构造文件内容结构
@@ -616,7 +621,8 @@ async fn extract_file_from_zip(
     session_id: &str,
     archive_path: &str,
     file_entry: &ZipFileEntry,
-    max_size: Option<u64>,
+    content_offset: Option<u64>,
+    content_length: Option<u64>,
 ) -> Result<Vec<u8>, crate::Error> {
     // 首先读取本地文件头部以获取完整的偏移信息
     const LOCAL_HEADER_SIZE: u64 = 30;
@@ -636,41 +642,93 @@ async fn extract_file_from_zip(
     // 计算实际数据的开始位置
     let data_offset = file_entry.local_header_offset + LOCAL_HEADER_SIZE + filename_len + extra_len;
 
-    // 确定要读取的大小
-    let read_size = match max_size {
-        Some(max) => std::cmp::min(max, file_entry.compressed_size),
-        None => file_entry.compressed_size,
-    };
+    println!("读取文件数据: 偏移={}, 压缩大小={} 字节, 解压后大小={} 字节",
+        data_offset, file_entry.compressed_size, file_entry.uncompressed_size);
 
-    println!("读取文件数据: 偏移={}, 大小={} 字节", data_offset, read_size);
-
-    // 读取压缩的文件数据
-    let compressed_data = storage_manager
-        .read_file_range(session_id, archive_path, data_offset, read_size)
-        .await
-        .map_err(|e| crate::Error::Internal(format!("读取文件数据失败: {}", e)))?;
-
-    // 根据压缩方法解压数据
+    // 根据压缩方法处理
     match file_entry.compression_method {
         0 => {
-            // 无压缩，直接返回
-            println!("文件未压缩，直接返回 {} 字节", compressed_data.len());
-            Ok(compressed_data)
+            // 无压缩，可以直接范围读取
+            let offset = content_offset.unwrap_or(0);
+            let length = content_length.unwrap_or_else(|| file_entry.compressed_size.saturating_sub(offset));
+            let read_size = std::cmp::min(length, file_entry.compressed_size.saturating_sub(offset));
+
+            println!("文件未压缩，直接范围读取: offset={}, length={}", offset, read_size);
+
+            let data = storage_manager
+                .read_file_range(session_id, archive_path, data_offset + offset, read_size)
+                .await
+                .map_err(|e| crate::Error::Internal(format!("读取文件数据失败: {}", e)))?;
+
+            Ok(data)
         }
         8 => {
             // Deflate压缩，需要解压
-            println!("使用Deflate解压，压缩数据大小: {} 字节", compressed_data.len());
+            // 如果有 content_offset，我们需要完整解压然后截取（因为流式解压无法跳过）
+            // 但可以限制解压的最大数据量来优化性能
+            println!("使用Deflate解压，压缩数据大小: {} 字节", file_entry.compressed_size);
 
             use flate2::read::DeflateDecoder;
             use std::io::Read;
 
-            let mut decoder = DeflateDecoder::new(&compressed_data[..]);
-            let mut decompressed = Vec::new();
-            decoder.read_to_end(&mut decompressed)
-                .map_err(|e| crate::Error::Internal(format!("解压失败: {}", e)))?;
+            // 读取全部压缩数据（对于deflate无法部分解压）
+            let compressed_data = storage_manager
+                .read_file_range(session_id, archive_path, data_offset, file_entry.compressed_size)
+                .await
+                .map_err(|e| crate::Error::Internal(format!("读取文件数据失败: {}", e)))?;
 
-            println!("解压完成，原始数据大小: {} 字节", decompressed.len());
-            Ok(decompressed)
+            let mut decoder = DeflateDecoder::new(&compressed_data[..]);
+
+            // 根据是否有偏移决定如何处理
+            if let Some(offset) = content_offset {
+                // 需要跳过前面的数据
+                println!("跳过解压数据的前 {} 字节", offset);
+
+                // 分配临时缓冲区跳过数据
+                const SKIP_BUFFER_SIZE: usize = 8192;
+                let mut skip_buffer = vec![0u8; SKIP_BUFFER_SIZE];
+                let mut skipped = 0u64;
+
+                while skipped < offset {
+                    let to_skip = std::cmp::min(SKIP_BUFFER_SIZE as u64, offset - skipped) as usize;
+                    let n = decoder.read(&mut skip_buffer[..to_skip])
+                        .map_err(|e| crate::Error::Internal(format!("跳过数据失败: {}", e)))?;
+                    if n == 0 {
+                        break; // EOF
+                    }
+                    skipped += n as u64;
+                }
+
+                // 读取指定长度的数据
+                let length = content_length.unwrap_or_else(|| {
+                    // 默认读取 1MB
+                    std::cmp::min(1024 * 1024, file_entry.uncompressed_size.saturating_sub(offset))
+                });
+
+                println!("读取解压后数据: length={}", length);
+                let mut result = Vec::with_capacity(length as usize);
+                let mut limited_reader = decoder.take(length);
+                limited_reader.read_to_end(&mut result)
+                    .map_err(|e| crate::Error::Internal(format!("读取解压数据失败: {}", e)))?;
+
+                println!("完成分块解压，返回 {} 字节", result.len());
+                Ok(result)
+            } else {
+                // 没有偏移，读取全部或限制长度
+                let max_read = content_length.unwrap_or_else(|| {
+                    // 默认最多读取 10MB
+                    std::cmp::min(10 * 1024 * 1024, file_entry.uncompressed_size)
+                });
+
+                println!("解压数据，最大读取: {} 字节", max_read);
+                let mut result = Vec::new();
+                let mut limited_reader = decoder.take(max_read);
+                limited_reader.read_to_end(&mut result)
+                    .map_err(|e| crate::Error::Internal(format!("解压失败: {}", e)))?;
+
+                println!("解压完成，原始数据大小: {} 字节", result.len());
+                Ok(result)
+            }
         }
         _ => {
             Err(crate::Error::BadRequest(format!(
