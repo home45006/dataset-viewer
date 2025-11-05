@@ -131,7 +131,7 @@
           }"
         >
           <div
-            class="text-[13px] font-mono leading-6 h-full pl-2 pr-4 whitespace-pre text-gray-900 dark:text-gray-100"
+            class="text-[13px] font-mono leading-6 h-full pl-2 pr-4 whitespace-pre text-gray-900 dark:text-gray-100 json-line"
             v-html="getHighlightedLineWithSearch(visibleLines[virtualItem.index]?.index)"
           />
         </div>
@@ -218,18 +218,40 @@ const updateLineNumberWidth = () => {
 // 高亮状态
 const highlightedLines = ref<string[]>([])
 
+// 检测深色模式
+const isDarkMode = computed(() => {
+  if (typeof window === 'undefined') return false
+  return document.documentElement.classList.contains('dark') ||
+         window.matchMedia('(prefers-color-scheme: dark)').matches
+})
+
 // 初始化语法高亮
 const initializeHighlighting = async () => {
   try {
-    const highlighted = await highlightCode(props.content, props.fileName)
-    // 从HTML中提取每行的高亮代码
-    const tempDiv = document.createElement('div')
-    tempDiv.innerHTML = highlighted
+    const highlighted = await highlightCode(props.content, props.fileName, isDarkMode.value)
 
-    // 移除外层的pre标签，只保留内容
-    const preElement = tempDiv.querySelector('pre')
-    if (preElement) {
-      highlightedLines.value = preElement.innerHTML.split('\n')
+    if (highlighted) {
+      // 从HTML中提取每行的高亮代码
+      const tempDiv = document.createElement('div')
+      tempDiv.innerHTML = highlighted
+
+      // 查找shiki容器，移除外层的pre标签
+      const preElement = tempDiv.querySelector('pre.shiki, pre')
+      if (preElement) {
+        // 处理code元素内容
+        const codeElement = preElement.querySelector('code')
+        if (codeElement) {
+          // 按行分割，保持HTML结构
+          const content = codeElement.innerHTML
+          highlightedLines.value = content.split('\n')
+        } else {
+          // 直接使用pre内容
+          highlightedLines.value = preElement.innerHTML.split('\n')
+        }
+      } else {
+        // 如果没有找到pre标签，直接分割内容
+        highlightedLines.value = tempDiv.innerHTML.split('\n')
+      }
     } else {
       highlightedLines.value = lines.value
     }
@@ -237,6 +259,9 @@ const initializeHighlighting = async () => {
     console.error('语法高亮失败:', error)
     highlightedLines.value = lines.value
   }
+
+  // 添加调试信息
+  console.log(`JSON语法高亮初始化完成: ${highlightedLines.value.length} 行, 主题: ${isDarkMode.value ? 'dark' : 'light'}`)
 }
 
 // 获取高亮的行内容
@@ -328,36 +353,59 @@ const getHighlightedLineWithSearch = (index: number): string => {
 
   let lineContent = getHighlightedLine(index)
 
+  // 如果没有搜索词或该行没有搜索结果，直接返回语法高亮的内容
   if (!searchTerm.value.trim() || !isSearchResultLine(index)) {
-    return lineContent
+    return lineContent || ''
   }
 
-  // 找到该行的所有搜索结果
-  const lineResults = searchResults.value.filter(result => result.lineIndex === index)
+  // 如果语法高亮内容为空，回退到原始文本
+  if (!lineContent) {
+    lineContent = lines.value[index] || ''
+  }
 
-  // 从后往前替换，避免位置偏移问题
-  lineResults.reverse().forEach(result => {
-    const isCurrentResult = searchResults.value[currentSearchIndex.value]?.lineIndex === index &&
-                           searchResults.value[currentSearchIndex.value]?.startPos === result.startPos
+  try {
+    // 找到该行的所有搜索结果
+    const lineResults = searchResults.value.filter(result => result.lineIndex === index)
 
-    const originalText = lines.value[index]
-    const beforeText = originalText.substring(0, result.startPos)
-    const matchText = originalText.substring(result.startPos, result.endPos)
-    const afterText = originalText.substring(result.endPos)
-
-    // 高亮当前搜索结果
-    const highlightClass = isCurrentResult
-      ? 'bg-yellow-300 dark:bg-yellow-600 text-black dark:text-white font-bold'
-      : 'bg-yellow-200 dark:bg-yellow-800 text-gray-900 dark:text-gray-100'
-
-    const highlightedMatch = `<span class="${highlightClass}">${escapeHtml(matchText)}</span>`
-
-    // 在高亮的HTML中进行替换需要更复杂的处理
-    // 这里简化处理，直接在原始文本基础上加高亮
-    if (lineContent === originalText) {
-      lineContent = escapeHtml(beforeText) + highlightedMatch + escapeHtml(afterText)
+    if (lineResults.length === 0) {
+      return lineContent
     }
-  })
+
+    const originalText = lines.value[index] || ''
+
+    // 如果已经有语法高亮，尝试在HTML中添加搜索高亮
+    if (lineContent !== originalText) {
+      // 对于有语法高亮的内容，使用简化的搜索高亮方式
+      const searchRegex = new RegExp(escapeRegExp(searchTerm.value), 'gi')
+      lineContent = lineContent.replace(searchRegex, (match) => {
+        const isCurrentResult = searchResults.value[currentSearchIndex.value]?.lineIndex === index
+        const highlightClass = isCurrentResult
+          ? 'bg-yellow-300 dark:bg-yellow-600 text-black dark:text-white font-bold search-highlight-current'
+          : 'bg-yellow-200 dark:bg-yellow-800 search-highlight'
+        return `<span class="${highlightClass}">${match}</span>`
+      })
+    } else {
+      // 对于没有语法高亮的内容，使用原来的方法
+      lineResults.reverse().forEach(result => {
+        const isCurrentResult = searchResults.value[currentSearchIndex.value]?.lineIndex === index &&
+                               searchResults.value[currentSearchIndex.value]?.startPos === result.startPos
+
+        const beforeText = originalText.substring(0, result.startPos)
+        const matchText = originalText.substring(result.startPos, result.endPos)
+        const afterText = originalText.substring(result.endPos)
+
+        const highlightClass = isCurrentResult
+          ? 'bg-yellow-300 dark:bg-yellow-600 text-black dark:text-white font-bold search-highlight-current'
+          : 'bg-yellow-200 dark:bg-yellow-800 text-gray-900 dark:text-gray-100 search-highlight'
+
+        const highlightedMatch = `<span class="${highlightClass}">${escapeHtml(matchText)}</span>`
+        lineContent = escapeHtml(beforeText) + highlightedMatch + escapeHtml(afterText)
+      })
+    }
+  } catch (error) {
+    console.warn('搜索高亮处理失败:', error)
+    return lineContent
+  }
 
   return lineContent
 }
@@ -530,6 +578,11 @@ watch(() => props.content, async () => {
   analyzeJsonStructure()
 }, { immediate: true })
 
+// 监听深色模式变化
+watch(isDarkMode, async () => {
+  await initializeHighlighting()
+})
+
 // 监听搜索词变化
 watch(searchTerm, () => {
   performSearch()
@@ -545,8 +598,110 @@ onMounted(async () => {
 
 <style scoped>
 /* 确保语法高亮的span元素显示正确 */
+:deep(.shiki) {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Monaco', 'Menlo', 'Ubuntu Mono', monospace !important;
+  font-size: 13px;
+  line-height: 1.5;
+  background: transparent !important;
+}
+
 :deep(.shiki span) {
   font-family: inherit !important;
+}
+
+/* Shiki生成的语法高亮样式优化 */
+:deep(span[style*="color"]) {
+  font-family: inherit !important;
+}
+
+/* 确保虚拟化行中的HTML元素正确显示 */
+:deep(.shiki *) {
+  background: inherit !important;
+  font-family: inherit !important;
+}
+
+/* JSON语法高亮的Shiki主题颜色调整 */
+/* 浅色模式 - 覆盖Shiki GitHub Light主题 */
+:deep(.shiki[data-theme="github-light"] .token.property),
+:deep(.shiki[data-theme="github-light"] .token.string.property) {
+  color: #0451a5 !important;
+}
+
+:deep(.shiki[data-theme="github-light"] .token.string) {
+  color: #032f62 !important;
+}
+
+:deep(.shiki[data-theme="github-light"] .token.number) {
+  color: #098658 !important;
+}
+
+:deep(.shiki[data-theme="github-light"] .token.boolean) {
+  color: #0000ff !important;
+}
+
+:deep(.shiki[data-theme="github-light"] .token.null) {
+  color: #795e26 !important;
+}
+
+/* 深色模式 - 覆盖Shiki GitHub Dark主题 */
+:deep(.shiki[data-theme="github-dark"] .token.property),
+:deep(.shiki[data-theme="github-dark"] .token.string.property) {
+  color: #9cdcfe !important;
+}
+
+:deep(.shiki[data-theme="github-dark"] .token.string) {
+  color: #ce9178 !important;
+}
+
+:deep(.shiki[data-theme="github-dark"] .token.number) {
+  color: #b5cea8 !important;
+}
+
+:deep(.shiki[data-theme="github-dark"] .token.boolean) {
+  color: #569cd6 !important;
+}
+
+:deep(.shiki[data-theme="github-dark"] .token.null) {
+  color: #dcdcaa !important;
+}
+
+/* JSON行显示优化 */
+.json-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 确保语法高亮元素在虚拟化容器中正确显示 */
+.json-line :deep(span) {
+  font-family: inherit !important;
+  font-size: inherit !important;
+  line-height: inherit !important;
+}
+
+/* 优化性能：避免不必要的重绘 */
+.json-line :deep(*) {
+  will-change: auto;
+  contain: style;
+}
+
+/* 搜索高亮样式 */
+:deep(.search-highlight) {
+  border-radius: 2px;
+  padding: 0 1px;
+  transition: all 0.2s ease;
+}
+
+:deep(.search-highlight-current) {
+  border-radius: 2px;
+  padding: 0 1px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2);
+  animation: pulse 1s ease-in-out;
+}
+
+@keyframes pulse {
+  0% { opacity: 0.8; }
+  50% { opacity: 1; }
+  100% { opacity: 0.8; }
 }
 
 /* 滚动条样式 */
