@@ -1,5 +1,8 @@
 use axum::{
+    body::Body,
     extract::{Path, State},
+    http::{header, StatusCode},
+    response::IntoResponse,
     Json,
 };
 use std::sync::Arc;
@@ -7,7 +10,7 @@ use std::sync::Arc;
 use crate::{
     api::types::{
         ApiResponse, ConnectRequest, ConnectResponse, FileContentRequest, ListRequest,
-        DownloadRequest, DownloadResponse, SessionInfo,
+        DownloadRequest, SessionInfo,
     },
     state::AppState,
     Error,
@@ -162,13 +165,77 @@ pub async fn download_file(
     State(state): State<Arc<AppState>>,
     Path(session_id): Path<String>,
     Json(request): Json<DownloadRequest>,
-) -> Result<Json<ApiResponse<DownloadResponse>>, Error> {
-    // TODO: 实现文件下载逻辑
-    let download_response = DownloadResponse {
-        download_id: uuid::Uuid::new_v4().to_string(),
-        file_size: 0,
-        started_at: chrono::Utc::now(),
+) -> Result<impl IntoResponse, Error> {
+    // 检查会话是否存在
+    if !state.storage_manager.session_exists(&session_id).await {
+        return Err(Error::NotFound("Session not found".to_string()));
+    }
+
+    // 提前克隆文件路径，避免生命周期问题
+    let file_path = request.file_path.clone();
+
+    // 获取文件大小
+    let file_size = state
+        .storage_manager
+        .get_file_size(&session_id, &file_path)
+        .await
+        .map_err(|e| Error::Storage(e))?;
+
+    // 获取文件名（从路径中提取）
+    let filename = std::path::Path::new(&file_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("download")
+        .to_string();
+
+    // 创建一个流式响应
+    // 我们将使用分块方式读取文件内容
+    const CHUNK_SIZE: u64 = 1024 * 1024; // 1MB chunks
+
+    // 创建一个异步流来读取文件
+    let stream = async_stream::stream! {
+        let mut offset = 0u64;
+
+        while offset < file_size {
+            let chunk_size = std::cmp::min(CHUNK_SIZE, file_size - offset);
+
+            match state
+                .storage_manager
+                .read_file_range(&session_id, &file_path, offset, chunk_size)
+                .await
+            {
+                Ok(chunk) => {
+                    yield Ok::<_, std::io::Error>(chunk);
+                    offset += chunk_size;
+                }
+                Err(e) => {
+                    eprintln!("读取文件分块失败: {}", e);
+                    yield Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        e.to_string()
+                    ));
+                    break;
+                }
+            }
+        }
     };
 
-    Ok(Json(ApiResponse::success(download_response)))
+    // 将流转换为Body
+    let body = Body::from_stream(stream);
+
+    // 构建响应
+    use axum::response::Response;
+
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{}\"", filename),
+        )
+        .header(header::CONTENT_LENGTH, file_size.to_string())
+        .body(body)
+        .map_err(|e| Error::Internal(format!("构建响应失败: {}", e)))?;
+
+    Ok(response)
 }

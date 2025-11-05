@@ -1480,6 +1480,10 @@ const handleFileClick = (file: any) => {
 // 下载文件
 const downloadFile = async (file: any) => {
   try {
+    // 显示下载中提示
+    appStore.setGlobalError('正在准备下载...')
+
+    // 发起下载请求
     const response = await fetch(`/api/storage/${sessionId.value}/file/download`, {
       method: 'POST',
       headers: {
@@ -1491,17 +1495,41 @@ const downloadFile = async (file: any) => {
       }),
     })
 
-    const data = await response.json()
-    
-    if (data.status === 'success') {
-      // 实际的下载逻辑需要后端支持
-      console.log('Download started:', data.data.download_id)
-    } else {
-      appStore.setGlobalError(`下载失败: ${data.message}`)
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
     }
+
+    // 获取文件名（从响应头或文件路径）
+    const contentDisposition = response.headers.get('Content-Disposition')
+    let filename = file.basename || 'download'
+
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/)
+      if (filenameMatch) {
+        filename = filenameMatch[1]
+      }
+    }
+
+    // 获取文件数据
+    const blob = await response.blob()
+
+    // 创建下载链接
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+
+    // 清理
+    window.URL.revokeObjectURL(url)
+    document.body.removeChild(a)
+
+    // 清除提示
+    appStore.setGlobalError('')
   } catch (error) {
     console.error('Download failed:', error)
-    appStore.setGlobalError('下载失败')
+    appStore.setGlobalError('下载失败: ' + (error instanceof Error ? error.message : String(error)))
   }
 }
 
